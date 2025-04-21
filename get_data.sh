@@ -27,8 +27,7 @@ find . -type f -name '*.zip' -print0 | while IFS= read -r -d '' ZIPFILE; do
         continue
     fi
     echo "  -> $ZIPFILE"
-    mkdir -p "$DIR"
-    unzip -q "$ZIPFILE" -d "$DIR"
+    unzip -q "$ZIPFILE"
     rm "$ZIPFILE" # remove the inner zip file
 done
 
