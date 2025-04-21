@@ -2,7 +2,7 @@
 
 #SBATCH --job-name=get_eeg_data
 #SBATCH --time=02:00:00
-#SBATCH --partition=thin
+#SBATCH --partition=rome
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --output=/home/scur0549/logs/out-%x.%A.out
