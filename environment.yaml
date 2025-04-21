@@ -1,0 +1,23 @@
+name: eeg-decoder
+channels:
+  - defaults
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+    - torch
+    - torchvision
+    - numpy
+    - tqdm
+    - pillow
+    - scikit-image 
+    - matplotlib
+    - einops
+    - transformers
+    - pillow
+    - mne
+    - pandas  
+    - scikit-learn
+    - gdown
