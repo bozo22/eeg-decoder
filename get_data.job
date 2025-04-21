@@ -13,7 +13,8 @@ module load 2023
 module load Anaconda3/2023.07-2
 
 # Set dataset location to scratch-shared space
-SCR_SHARED=/scratch-shared/$USER/datasets
+SCR_SHARED=/scratch-shared/$USER/datasets/Things-EEG2
+mkdir -p "$SCR_SHARED"
 
 # Run the download / extraction script
 SCRIPT=$HOME/eeg-decoder/get_data.sh
@@ -23,4 +24,5 @@ cp $SCRIPT $SCR_SHARED
 echo "Starting dataset download + extraction in $SCR_SHARED ..."
 cd   "$SCR_SHARED"
 bash "$SCRIPT"
+rm "$SCRIPT"
 echo "Done.  THINGS‑EEG available at $SCR_SHARED"
