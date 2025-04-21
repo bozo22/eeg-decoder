@@ -1,0 +1,26 @@
+#!/bin/bash
+
+#SBATCH --job-name=get_eeg_data
+#SBATCH --time=02:00:00
+#SBATCH --partition=thin
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --output=/home/scur0549/logs/out-%x.%A.out
+#SBATCH --error=/home/scur0549/logs/err-%x.%A.err
+
+# The default modules for deep learning
+module load 2023
+module load Anaconda3/2023.07-2
+
+# Set dataset location to scratch-shared space
+SCR_SHARED=/scratch-shared/$USER/datasets
+
+# Run the download / extraction script
+SCRIPT=$HOME/eeg-decoder/get_data.sh
+# copy the script to the scratch-shared space
+cp $SCRIPT $SCR_SHARED
+
+echo "Starting dataset download + extraction in $SCR_SHARED ..."
+cd   "$SCR_SHARED"
+bash "$SCRIPT"
+echo "Done.  THINGS‑EEG available at $SCR_SHARED"

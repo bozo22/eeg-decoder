@@ -20,4 +20,3 @@ dependencies:
     - mne
     - pandas  
     - scikit-learn
-    - gdown
