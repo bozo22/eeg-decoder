@@ -1,10 +1,10 @@
 #!/bin/bash
 
-#SBATCH --partition=gpu_mig
+#SBATCH --partition=gpu
 #SBATCH --gpus=1
 #SBATCH --job-name=CheckEnvironment
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=9
+#SBATCH --cpus-per-task=18
 #SBATCH --time=00:10:00
 #SBATCH --output=/home/scur0549/logs/out-%x.%A.out
 #SBATCH --error=/home/scur0549/logs/err-%x.%A.err
