@@ -175,3 +175,12 @@ cython_debug/
 
 # OS unzipped files
 .DS_Store
+
+# Dataset
+Things-EEG2
+
+# VSCode
+.vscode
+
+# Results
+NICE-EEG-main/results

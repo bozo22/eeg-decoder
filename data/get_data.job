@@ -17,12 +17,11 @@ SCR_SHARED=/scratch-shared/$USER/datasets/Things-EEG2
 mkdir -p "$SCR_SHARED"
 
 # Run the download / extraction script
-SCRIPT=$HOME/eeg-decoder/get_data.sh
+SCRIPT=$HOME/eeg-decoder/data/get_data.sh
 # copy the script to the scratch-shared space
 cp $SCRIPT $SCR_SHARED
 
 echo "Starting dataset download + extraction in $SCR_SHARED ..."
 cd   "$SCR_SHARED"
 bash "$SCRIPT"
-rm "$SCRIPT"
 echo "Done.  THINGS‑EEG available at $SCR_SHARED"

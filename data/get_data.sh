@@ -8,14 +8,14 @@ set -euo pipefail
 DATA_URL="https://plus.figshare.com/ndownloader/articles/18470912/versions/4"
 TOP_ZIP="things_eeg2.zip"
 
-# # 1. Download
-# echo "Downloading dataset archive ..."
-# wget --content-disposition -O "$TOP_ZIP" "$DATA_URL"
+# 1. Download
+echo "Downloading dataset archive ..."
+wget --content-disposition -O "$TOP_ZIP" "$DATA_URL"
 
-# # 2. Unpack top‑level downloaded archive
-# echo "Unzipping top‑level archive ..."
-# unzip -q "$TOP_ZIP"
-# rm "$TOP_ZIP"                      
+# 2. Unpack top‑level downloaded archive
+echo "Unzipping top‑level archive ..."
+unzip -q "$TOP_ZIP"
+rm "$TOP_ZIP"                      
 
 export UNZIP_DISABLE_ZIPBOMB_DETECTION=TRUE # disable zipbomb detection
 # 3. Recursively find every *.zip and expand it next to itself
