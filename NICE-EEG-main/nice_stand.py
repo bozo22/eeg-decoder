@@ -286,12 +286,11 @@ class IE():
 
             for i, (eeg, img) in enumerate(self.dataloader):
 
-                eeg = Variable(eeg.to(device).type(self.Tensor))
                 # img = Variable(img.cuda().type(self.Tensor))
-                img_features = Variable(img.to(device).type(self.Tensor))
-                # label = Variable(label.cuda().type(self.LongTensor))
+                eeg = eeg.type(self.Tensor).to(device)
+                img_features = img.type(self.Tensor).to(device)
                 labels = torch.arange(eeg.shape[0])  # used for the loss
-                labels = Variable(labels.to(device).type(self.LongTensor))
+                labels = labels.type(self.LongTensor).to(device)
 
                 # obtain the features
                 eeg_features = self.Enc_eeg(eeg)
@@ -330,11 +329,11 @@ class IE():
                 with torch.no_grad():
                     # * validation part
                     for i, (veeg, vimg) in enumerate(self.val_dataloader):
-                        
-                        veeg = Variable(veeg.to(device).type(self.Tensor))
-                        vimg_features = Variable(vimg.to(device).type(self.Tensor))
+
+                        veeg = veeg.type(self.Tensor).to(device)
+                        vimg_features = vimg.type(self.Tensor).to(device)
                         vlabels = torch.arange(veeg.shape[0])
-                        vlabels = Variable(vlabels.to(device).type(self.LongTensor))
+                        vlabels = vlabels.type(self.LongTensor).to(device)
 
                         veeg_features = self.Enc_eeg(veeg)
                         veeg_features = self.Proj_eeg(veeg_features)
@@ -386,9 +385,9 @@ class IE():
 
         with torch.no_grad():
             for i, (teeg, tlabel) in enumerate(self.test_dataloader):
-                teeg = Variable(teeg.to(device).type(self.Tensor))
-                tlabel = Variable(tlabel.to(device).type(self.LongTensor))
-                all_center = Variable(all_center.to(device).type(self.Tensor))            
+                teeg = teeg.type(self.Tensor).to(device)
+                tlabel = tlabel.type(self.LongTensor).to(device)
+                all_center = all_center.type(self.Tensor).to(device)            
 
                 tfea = self.Proj_eeg(self.Enc_eeg(teeg))
                 tfea = tfea / tfea.norm(dim=1, keepdim=True)
