@@ -48,6 +48,8 @@ parser.add_argument('--seed', default=2023, type=int,
                     help='seed for initializing training. ')
 parser.add_argument('--dataset_path', default='Things-EEG2/Preprocessed_data_250Hz/', type=str, help='Path to the dataset. ')
 parser.add_argument('--device', default='gpu', type=str, choices=['gpu', 'cpu'], help='Device to use for training.')
+parser.add_argument('--mixup', action='store_true', help='Use mixup data augmentation')
+parser.add_argument('--mixup-alpha', type=float, default=0.2, help='Mixup alpha parameter')
 
 args = parser.parse_args()
 pprint(args)
@@ -165,6 +167,9 @@ class IE():
         self.batch_size_test = 400
         self.batch_size_img = 500 
         self.n_epochs = args.epoch
+
+        self.use_mixup = args.mixup
+        self.mixup_alpha = args.mixup_alpha
 
         self.lambda_cen = 0.003
         self.alpha = 0.5
@@ -285,20 +290,38 @@ class IE():
             # starttime_epoch = datetime.datetime.now()
 
             for i, (eeg, img) in enumerate(self.dataloader):
-
+                
                 # img = Variable(img.cuda().type(self.Tensor))
                 eeg = eeg.type(self.Tensor).to(device)
                 img_features = img.type(self.Tensor).to(device)
                 labels = torch.arange(eeg.shape[0])  # used for the loss
                 labels = labels.type(self.LongTensor).to(device)
+                
+                if self.use_mixup:
+                    # Apply mixup to both EEG and image features using the same permutation and lambda
+                    # This maintains correspondence between mixed samples
+                    batch_size = eeg.size(0)
+                    index = torch.randperm(batch_size).to(device)
+                    lam = np.random.beta(self.mixup_alpha, self.mixup_alpha)
+                    
+                    # Mix both modalities consistently
+                    mixed_eeg = lam * eeg + (1 - lam) * eeg[index]
+                    mixed_img_features = lam * img_features + (1 - lam) * img_features[index]
+                    
+                    # Process with mixed data
+                    eeg_features = self.Enc_eeg(mixed_eeg)
+                    eeg_features = self.Proj_eeg(eeg_features)
+                    img_features = self.Proj_img(mixed_img_features)
+                
 
-                # obtain the features
-                eeg_features = self.Enc_eeg(eeg)
-                # img_features = self.Enc_img(img).last_hidden_state[:,0,:]
+                else:
+                    # obtain the features
+                    eeg_features = self.Enc_eeg(eeg)
+                    # img_features = self.Enc_img(img).last_hidden_state[:,0,:]
 
-                # project the features to a multimodal embedding space
-                eeg_features = self.Proj_eeg(eeg_features)
-                img_features = self.Proj_img(img_features)
+                    # project the features to a multimodal embedding space
+                    eeg_features = self.Proj_eeg(eeg_features)
+                    img_features = self.Proj_img(img_features)
 
                 # normalize the features
                 eeg_features = eeg_features / eeg_features.norm(dim=1, keepdim=True)
