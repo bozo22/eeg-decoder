@@ -424,6 +424,10 @@ class IE():
                         veeg_features = self.Enc_eeg(veeg)
                         veeg_features = self.Proj_eeg(veeg_features)
                         vimg_features = self.Proj_img(vimg_features)
+                        
+                        # Adding cross att
+                        # Untested, not sure if this part works the same 
+                        # veeg_features = self.cross_att(veeg_features, vimg_features)
 
                         veeg_features = veeg_features / veeg_features.norm(dim=1, keepdim=True)
                         vimg_features = vimg_features / vimg_features.norm(dim=1, keepdim=True)
