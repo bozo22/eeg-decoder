@@ -235,7 +235,7 @@ class IE():
         self.Tensor = torch.FloatTensor
         self.LongTensor = torch.LongTensor
 
-        self.cross_att1 = CrossAttentionBlock(emb_dim = self.proj_dim, num_heads = self.num_heads, dropout_p = self.dropout3)
+        self.cross_att1 = CrossAttentionBlock(emb_dim = self.proj_dim, num_heads = self.num_heads, dropout_p = self.dropout3).to(device)
 
         self.criterion_l1 = torch.nn.L1Loss().cuda()
         self.criterion_l2 = torch.nn.MSELoss().cuda()
