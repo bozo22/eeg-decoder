@@ -160,10 +160,10 @@ class CrossAttentionBlock(nn.Module):
 
         self.Attention1 = nn.MultiheadAttention(emb_dim, num_heads, dropout = dropout_p)
         self.Attention2 = nn.MultiheadAttention(emb_dim, num_heads, dropout = dropout_p)
-        self.layer_norm11 = nn.RMSNorm()
-        self.layer_norm12 = nn.RMSNorm()
-        self.layer_norm21 = nn.RMSNorm()
-        self.layer_norm22 = nn.RMSNorm()
+        self.layer_norm11 = nn.RMSNorm(emb_dim)
+        self.layer_norm12 = nn.RMSNorm(emb_dim)
+        self.layer_norm21 = nn.RMSNorm(emb_dim)
+        self.layer_norm22 = nn.RMSNorm(emb_dim)
         self.mlp1 = nn.Sequential(
             nn.Linear(emb_dim, emb_dim),
             nn.GELU(),
