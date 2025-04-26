@@ -191,6 +191,31 @@ class CrossAttentionBlock(nn.Module):
         eeg_enc = self.mlp2(eeg_enc) + eeg_enc
 
         return eeg_enc, image_enc
+    
+class CrossAttention(nn.Module):
+    def __init__(self, emb_dim, num_heads, dropout_p, n_blocks):
+        super().__init__()
+        
+        attention_blocks = []
+        for i in range(n_blocks):
+            attention_blocks.append(CrossAttentionBlock(emb_dim, num_heads, dropout_p))
+        self.attention_blocks = nn.Sequential(*attention_blocks)
+
+        # Somewhat arbitrary architecture
+        self.mlp = nn.Sequential(
+            nn.Linear(emb_dim *2, emb_dim),
+            nn.GELU(),
+            nn.Linear(emb_dim, emb_dim),
+            nn.Dropout(dropout_p)
+        )
+    
+    def forward(self, eeg_enc, image_enc):
+        eeg_enc, image_enc = self.attention_blocks(eeg_enc, image_enc)
+        eeg_enc = torch.cat((eeg_enc, image_enc), -1)
+        eeg_enc = self.mlp(eeg_enc)
+
+        return eeg_enc
+
 
         
 
@@ -217,6 +242,7 @@ class IE():
         self.dropout3 = 0.3
         self.num_heads = 4
         self.proj_dim = 768
+        self.n_att_blocks = 2
 
         self.lr = 0.0002
         self.b1 = 0.5
@@ -235,7 +261,8 @@ class IE():
         self.Tensor = torch.FloatTensor
         self.LongTensor = torch.LongTensor
 
-        self.cross_att1 = CrossAttentionBlock(emb_dim = self.proj_dim, num_heads = self.num_heads, dropout_p = self.dropout3).to(device)
+        self.cross_att = CrossAttention(emb_dim = self.proj_dim, num_heads = self.num_heads, \
+                                        dropout_p = self.dropout3, n_blocks=self.n_att_blocks).to(device)
 
         self.criterion_l1 = torch.nn.L1Loss().cuda()
         self.criterion_l2 = torch.nn.MSELoss().cuda()
@@ -350,7 +377,7 @@ class IE():
                 img_features = self.Proj_img(img_features)
 
                 # apply cross-attention
-                eeg_features, img_features = self.cross_att1(eeg_features, img_features)
+                eeg_features = self.cross_att(eeg_features, img_features)
             
 
                 # normalize the features
