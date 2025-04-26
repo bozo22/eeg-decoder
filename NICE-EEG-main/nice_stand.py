@@ -12,6 +12,7 @@ import datetime
 import time
 import numpy as np
 import pandas as pd
+from pprint import pprint
 
 import torch
 import torch.nn as nn
@@ -22,13 +23,17 @@ from torch import Tensor
 from torch.autograd import Variable
 from einops.layers.torch import Rearrange
 
+from utils.utils import load_model, save_model, seed_experiments
 
-gpus = [6]
-os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(map(str, gpus))
-result_path = '/home/NICE/results/' 
+# gpus = [0]
+# os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+# os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(map(str, gpus))
+NICE_path = os.path.dirname(os.path.abspath(__file__))
+result_path = os.path.join(NICE_path, 'results')
+model_checkpoint_path = os.path.join(result_path, 'checkpoints')
 model_idx = 'test0'
- 
+
+
 parser = argparse.ArgumentParser(description='Experiment Stimuli Recognition test with CLIP encoder')
 parser.add_argument('--dnn', default='clip', type=str)
 parser.add_argument('--epoch', default='200', type=int)
@@ -41,6 +46,18 @@ parser.add_argument('-batch_size', '--batch-size', default=1000, type=int,
                          'using Data Parallel or Distributed Data Parallel')
 parser.add_argument('--seed', default=2023, type=int,
                     help='seed for initializing training. ')
+parser.add_argument('--dataset_path', default='Things-EEG2/Preprocessed_data_250Hz/', type=str, help='Path to the dataset. ')
+parser.add_argument('--device', default='gpu', type=str, choices=['gpu', 'cpu'], help='Device to use for training.')
+
+args = parser.parse_args()
+pprint(args)
+
+# Set device
+device = torch.device('cuda' if torch.cuda.is_available() and args.device == 'gpu' else 'cpu')
+print(f'Using device: {device}')
+
+# Import function
+seed_experiments(args.seed)
 
 
 def weights_init_normal(m):
@@ -160,25 +177,26 @@ class IE():
         self.nSub = nsub
 
         self.start_epoch = 0
-        self.eeg_data_path = '/home/Data/Things-EEG2/Preprocessed_data_250Hz/'
-        self.img_data_path = './dnn_feature/'
-        self.test_center_path = './dnn_feature/'
+        self.eeg_data_path = args.dataset_path
+        self.img_data_path = os.path.join(NICE_path, 'dnn_feature/')
+        self.test_center_path = os.path.join(NICE_path, 'dnn_feature/')
         self.pretrain = False
 
-        self.log_write = open(result_path + "log_subject%d.txt" % self.nSub, "w")
+        os.makedirs(result_path, exist_ok=True)
+        self.log_write = open(os.path.join(result_path, f"log_subject{self.nSub}.txt"), "w")
 
-        self.Tensor = torch.cuda.FloatTensor
-        self.LongTensor = torch.cuda.LongTensor
+        self.Tensor = torch.FloatTensor
+        self.LongTensor = torch.LongTensor
 
         self.criterion_l1 = torch.nn.L1Loss().cuda()
         self.criterion_l2 = torch.nn.MSELoss().cuda()
         self.criterion_cls = torch.nn.CrossEntropyLoss().cuda()
-        self.Enc_eeg = Enc_eeg().cuda()
-        self.Proj_eeg = Proj_eeg().cuda()
-        self.Proj_img = Proj_img().cuda()
-        self.Enc_eeg = nn.DataParallel(self.Enc_eeg, device_ids=[i for i in range(len(gpus))])
-        self.Proj_eeg = nn.DataParallel(self.Proj_eeg, device_ids=[i for i in range(len(gpus))])
-        self.Proj_img = nn.DataParallel(self.Proj_img, device_ids=[i for i in range(len(gpus))])
+        self.Enc_eeg = Enc_eeg().to(device)
+        self.Proj_eeg = Proj_eeg().to(device)
+        self.Proj_img = Proj_img().to(device)
+        # self.Enc_eeg = nn.DataParallel(self.Enc_eeg, device_ids=[i for i in range(len(gpus))])
+        # self.Proj_eeg = nn.DataParallel(self.Proj_eeg, device_ids=[i for i in range(len(gpus))])
+        # self.Proj_img = nn.DataParallel(self.Proj_img, device_ids=[i for i in range(len(gpus))])
 
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         self.centers = {}
@@ -191,7 +209,7 @@ class IE():
         test_data = []
         test_label = np.arange(200)
 
-        train_data = np.load(self.eeg_data_path + '/sub-' + format(self.nSub, '02') + '/preprocessed_eeg_training.npy', allow_pickle=True)
+        train_data = np.load(os.path.join(self.eeg_data_path, 'sub-' + format(self.nSub, '02'), 'preprocessed_eeg_training.npy'), allow_pickle=True)
         train_data = train_data['preprocessed_eeg_data']
         train_data = np.mean(train_data, axis=1)
         train_data = np.expand_dims(train_data, axis=1)
@@ -268,12 +286,11 @@ class IE():
 
             for i, (eeg, img) in enumerate(self.dataloader):
 
-                eeg = Variable(eeg.cuda().type(self.Tensor))
                 # img = Variable(img.cuda().type(self.Tensor))
-                img_features = Variable(img.cuda().type(self.Tensor))
-                # label = Variable(label.cuda().type(self.LongTensor))
+                eeg = eeg.type(self.Tensor).to(device)
+                img_features = img.type(self.Tensor).to(device)
                 labels = torch.arange(eeg.shape[0])  # used for the loss
-                labels = Variable(labels.cuda().type(self.LongTensor))
+                labels = labels.type(self.LongTensor).to(device)
 
                 # obtain the features
                 eeg_features = self.Enc_eeg(eeg)
@@ -313,10 +330,10 @@ class IE():
                     # * validation part
                     for i, (veeg, vimg) in enumerate(self.val_dataloader):
 
-                        veeg = Variable(veeg.cuda().type(self.Tensor))
-                        vimg_features = Variable(vimg.cuda().type(self.Tensor))
+                        veeg = veeg.type(self.Tensor).to(device)
+                        vimg_features = vimg.type(self.Tensor).to(device)
                         vlabels = torch.arange(veeg.shape[0])
-                        vlabels = Variable(vlabels.cuda().type(self.LongTensor))
+                        vlabels = vlabels.type(self.LongTensor).to(device)
 
                         veeg_features = self.Enc_eeg(veeg)
                         veeg_features = self.Proj_eeg(veeg_features)
@@ -337,9 +354,11 @@ class IE():
                         if vloss <= best_loss_val:
                             best_loss_val = vloss
                             best_epoch = e + 1
-                            torch.save(self.Enc_eeg.module.state_dict(), './model/' + model_idx + 'Enc_eeg_cls.pth')
-                            torch.save(self.Proj_eeg.module.state_dict(), './model/' + model_idx + 'Proj_eeg_cls.pth')
-                            torch.save(self.Proj_img.module.state_dict(), './model/' + model_idx + 'Proj_img_cls.pth')
+                            os.makedirs(model_checkpoint_path, exist_ok=True)
+                            # Save models, handling both DataParallel and non-DataParallel cases
+                            save_model(self.Enc_eeg, model_checkpoint_path, model_idx)
+                            save_model(self.Proj_eeg, model_checkpoint_path, model_idx)
+                            save_model(self.Proj_img, model_checkpoint_path, model_idx)
 
                 print('Epoch:', e,
                       '  Cos eeg: %.4f' % loss_eeg.detach().cpu().numpy(),
@@ -356,9 +375,9 @@ class IE():
         top3 = 0
         top5 = 0
 
-        self.Enc_eeg.load_state_dict(torch.load('./model/' + model_idx + 'Enc_eeg_cls.pth'), strict=False)
-        self.Proj_eeg.load_state_dict(torch.load('./model/' + model_idx + 'Proj_eeg_cls.pth'), strict=False)
-        self.Proj_img.load_state_dict(torch.load('./model/' + model_idx + 'Proj_img_cls.pth'), strict=False)
+        self.Enc_eeg = load_model(self.Enc_eeg, model_checkpoint_path, model_idx)
+        self.Proj_eeg = load_model(self.Proj_eeg, model_checkpoint_path, model_idx)
+        self.Proj_img = load_model(self.Proj_img, model_checkpoint_path, model_idx)
 
         self.Enc_eeg.eval()
         self.Proj_eeg.eval()
@@ -366,9 +385,9 @@ class IE():
 
         with torch.no_grad():
             for i, (teeg, tlabel) in enumerate(self.test_dataloader):
-                teeg = Variable(teeg.type(self.Tensor))
-                tlabel = Variable(tlabel.type(self.LongTensor))
-                all_center = Variable(all_center.type(self.Tensor))            
+                teeg = teeg.type(self.Tensor).to(device)
+                tlabel = tlabel.type(self.LongTensor).to(device)
+                all_center = all_center.type(self.Tensor).to(device)            
 
                 tfea = self.Proj_eeg(self.Enc_eeg(teeg))
                 tfea = tfea / tfea.norm(dim=1, keepdim=True)
@@ -395,8 +414,6 @@ class IE():
 
 
 def main():
-    args = parser.parse_args()
-
     num_sub = args.num_sub   
     cal_num = 0
     aver = []
@@ -408,13 +425,6 @@ def main():
         cal_num += 1
         starttime = datetime.datetime.now()
         seed_n = np.random.randint(args.seed)
-
-        print('seed is ' + str(seed_n))
-        random.seed(seed_n)
-        np.random.seed(seed_n)
-        torch.manual_seed(seed_n)
-        torch.cuda.manual_seed(seed_n)
-        torch.cuda.manual_seed_all(seed_n)
 
         print('Subject %d' % (i+1))
         ie = IE(args, i + 1)
@@ -437,7 +447,7 @@ def main():
     column = np.arange(1, cal_num+1).tolist()
     column.append('ave')
     pd_all = pd.DataFrame(columns=column, data=[aver, aver3, aver5])
-    pd_all.to_csv(result_path + 'result.csv')
+    pd_all.to_csv(os.path.join(result_path, 'train_results.csv'))
 
 if __name__ == "__main__":
     print(time.asctime(time.localtime(time.time())))

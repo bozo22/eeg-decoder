@@ -172,3 +172,15 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# OS unzipped files
+.DS_Store
+
+# Dataset
+Things-EEG2
+
+# VSCode
+.vscode
+
+# Results
+NICE-EEG-main/results
