@@ -427,7 +427,7 @@ class IE():
                         
                         # Adding cross att
                         # Untested, not sure if this part works the same 
-                        # veeg_features = self.cross_att(veeg_features, vimg_features)
+                        veeg_features = self.cross_att(veeg_features, vimg_features)
 
                         veeg_features = veeg_features / veeg_features.norm(dim=1, keepdim=True)
                         vimg_features = vimg_features / vimg_features.norm(dim=1, keepdim=True)
@@ -447,6 +447,7 @@ class IE():
                             os.makedirs(model_checkpoint_path, exist_ok=True)
                             # Save models, handling both DataParallel and non-DataParallel cases
                             save_model(self.Enc_eeg, model_checkpoint_path, model_idx)
+                            save_model(self.cross_att, model_checkpoint_path, model_idx)
                             save_model(self.Proj_eeg, model_checkpoint_path, model_idx)
                             save_model(self.Proj_img, model_checkpoint_path, model_idx)
 
@@ -466,10 +467,12 @@ class IE():
         top5 = 0
 
         self.Enc_eeg = load_model(self.Enc_eeg, model_checkpoint_path, model_idx)
+        self.cross_att = load_model(self.cross_att, model_checkpoint_path, model_idx)
         self.Proj_eeg = load_model(self.Proj_eeg, model_checkpoint_path, model_idx)
         self.Proj_img = load_model(self.Proj_img, model_checkpoint_path, model_idx)
 
         self.Enc_eeg.eval()
+        self.cross_att.eval()
         self.Proj_eeg.eval()
         self.Proj_img.eval()
 
@@ -480,6 +483,13 @@ class IE():
                 all_center = all_center.type(self.Tensor).to(device)            
 
                 tfea = self.Proj_eeg(self.Enc_eeg(teeg))
+
+                # TODO: Duplicate tfea, and apply cross att with all test centers
+                # Not real code!
+                # tfea = duplicate(tfea, as many times as there are centers)
+                # tfea = self.cross_att(tfea, all_center)
+                # get_sim(tfea, all_center)
+
                 tfea = tfea / tfea.norm(dim=1, keepdim=True)
                 similarity = (100.0 * tfea @ all_center.t()).softmax(dim=-1)  # no use 100?
                 _, indices = similarity.topk(5)
