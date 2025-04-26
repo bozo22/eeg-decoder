@@ -181,8 +181,8 @@ class CrossAttentionBlock(nn.Module):
         image_enc = self.layer_norm11(image_enc)
         eeg_enc = self.layer_norm12(eeg_enc)
 
-        image_enc = self.Attention1(image_enc, eeg_enc, eeg_enc, need_weights = False) + image_enc
-        eeg_enc = self.Attention2(eeg_enc, image_enc, image_enc, need_weights = False) + eeg_enc
+        image_enc = self.Attention1(image_enc, eeg_enc, eeg_enc)[0] + image_enc
+        eeg_enc = self.Attention2(eeg_enc, image_enc, image_enc)[0] + eeg_enc
 
         image_enc = self.layer_norm21(image_enc)
         eeg_enc = self.layer_norm12(eeg_enc)
