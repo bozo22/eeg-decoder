@@ -153,6 +153,47 @@ class Proj_img(nn.Sequential):
         )
     def forward(self, x):
         return x 
+    
+class CrossAttentionBlock(nn.Module):
+    def __init__(self, emb_dim, num_heads, dropout_p):
+        super().__init__()
+
+        self.Attention1 = nn.MultiheadAttention(emb_dim, num_heads, dropout = dropout_p)
+        self.Attention2 = nn.MultiheadAttention(emb_dim, num_heads, dropout = dropout_p)
+        self.layer_norm11 = nn.RMSNorm()
+        self.layer_norm12 = nn.RMSNorm()
+        self.layer_norm21 = nn.RMSNorm()
+        self.layer_norm22 = nn.RMSNorm()
+        self.mlp1 = nn.Sequential(
+            nn.Linear(emb_dim, emb_dim),
+            nn.GELU(),
+            nn.Linear(emb_dim, emb_dim),
+            nn.Dropout(dropout_p)
+        )
+        self.mlp2 = nn.Sequential(
+            nn.Linear(emb_dim, emb_dim),
+            nn.GELU(),
+            nn.Linear(emb_dim, emb_dim),
+            nn.Dropout(dropout_p)
+        )
+
+    def forward(self, eeg_enc, image_enc):
+        image_enc = self.layer_norm11(image_enc)
+        eeg_enc = self.layer_norm12(eeg_enc)
+
+        image_enc = self.Attention1(image_enc, eeg_enc, eeg_enc) + image_enc
+        eeg_enc = self.Attention2(eeg_enc, image_enc, image_enc) + eeg_enc
+
+        image_enc = self.layer_norm21(image_enc)
+        eeg_enc = self.layer_norm12(eeg_enc)
+
+        image_enc = self.mlp1(image_enc) + image_enc
+        eeg_enc = self.mlp2(eeg_enc) + eeg_enc
+
+        return eeg_enc, image_enc
+
+        
+
 
 
 # Image2EEG
@@ -167,9 +208,15 @@ class IE():
         self.n_epochs = args.epoch
 
         self.lambda_cen = 0.003
-        self.alpha = 0.5
 
-        self.proj_dim = 256
+        # projection layer dropout
+        self.dropout1 = 0.5
+        self.dropout2 = 0.3
+
+        # cross attention parameters
+        self.dropout3 = 0.3
+        self.num_heads = 4
+        self.proj_dim = 768
 
         self.lr = 0.0002
         self.b1 = 0.5
@@ -188,12 +235,14 @@ class IE():
         self.Tensor = torch.FloatTensor
         self.LongTensor = torch.LongTensor
 
+        self.cross_att1 = CrossAttentionBlock(emb_dim = self.proj_dim, num_heads = self.num_heads, dropout_p = self.dropout3)
+
         self.criterion_l1 = torch.nn.L1Loss().cuda()
         self.criterion_l2 = torch.nn.MSELoss().cuda()
         self.criterion_cls = torch.nn.CrossEntropyLoss().cuda()
         self.Enc_eeg = Enc_eeg().to(device)
-        self.Proj_eeg = Proj_eeg().to(device)
-        self.Proj_img = Proj_img().to(device)
+        self.Proj_eeg = Proj_eeg(proj_dim = self.proj_dim, drop_proj = self.dropout1).to(device)
+        self.Proj_img = Proj_img(proj_dim = self.proj_dim, drop_proj = self.dropout2).to(device)
         # self.Enc_eeg = nn.DataParallel(self.Enc_eeg, device_ids=[i for i in range(len(gpus))])
         # self.Proj_eeg = nn.DataParallel(self.Proj_eeg, device_ids=[i for i in range(len(gpus))])
         # self.Proj_img = nn.DataParallel(self.Proj_img, device_ids=[i for i in range(len(gpus))])
@@ -299,6 +348,10 @@ class IE():
                 # project the features to a multimodal embedding space
                 eeg_features = self.Proj_eeg(eeg_features)
                 img_features = self.Proj_img(img_features)
+
+                # apply cross-attention
+                eeg_features, img_features = self.cross_att1(eeg_features, img_features)
+            
 
                 # normalize the features
                 eeg_features = eeg_features / eeg_features.norm(dim=1, keepdim=True)
