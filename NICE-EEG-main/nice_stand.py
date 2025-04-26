@@ -199,7 +199,7 @@ class CrossAttention(nn.Module):
         attention_blocks = []
         for i in range(n_blocks):
             attention_blocks.append(CrossAttentionBlock(emb_dim, num_heads, dropout_p))
-        self.attention_blocks = nn.Sequential(*attention_blocks)
+        self.attention_blocks = mySequential(attention_blocks)
 
         # Somewhat arbitrary architecture
         self.mlp = nn.Sequential(
@@ -215,6 +215,12 @@ class CrossAttention(nn.Module):
         eeg_enc = self.mlp(eeg_enc)
 
         return eeg_enc
+    
+class mySequential(nn.Sequential):
+    def forward(self, *input):
+        for module in self._modules.values():
+            input = module(*input)
+        return input
 
 
         
