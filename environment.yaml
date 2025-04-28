@@ -20,3 +20,4 @@ dependencies:
     - mne
     - pandas  
     - scikit-learn
+    - wandb

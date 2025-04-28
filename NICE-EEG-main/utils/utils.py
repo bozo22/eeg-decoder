@@ -3,6 +3,7 @@ import random
 import numpy as np
 import torch
 import torch.nn as nn
+import wandb
 
 def seed_experiments(seed):
     print(f'Seeding experiments with seed: {seed}')
@@ -28,3 +29,17 @@ def load_model(model, chekpoint_path, model_idx):
     model.load_state_dict(model_state_dict)
     print(f"Model {model_name} loaded from {save_path}")
     return model
+
+
+def wandb_login(disable_wandb: bool):
+    if disable_wandb:
+        print("!! WandB disabled !!")
+        return
+    else:
+        try:
+            with open("wandb.password", "rt") as f:
+                pw = f.readline().strip()
+                os.environ["WANDB_API_KEY"] = pw
+                wandb.login()
+        except FileNotFoundError:
+            raise FileNotFoundError("File wandb.password was not found in the project root. Either add it or disable wandb by running --disable_wandb")
