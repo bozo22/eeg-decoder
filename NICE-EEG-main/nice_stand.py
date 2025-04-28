@@ -4,12 +4,9 @@ Object recognition Things-EEG2 dataset
 use 250 Hz data
 """
 
-import math
 import os
 import argparse
-import random
 import itertools
-import datetime
 import time
 import numpy as np
 import pandas as pd
@@ -19,9 +16,6 @@ import wandb
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.nn.init as init
-from torch import Tensor
 
 from torch.utils.data import Subset
 
@@ -40,8 +34,6 @@ model_idx = 'test0'
 parser = argparse.ArgumentParser(description='Experiment Stimuli Recognition test with CLIP encoder')
 # Architectures
 parser.add_argument('--dnn', default='clip', type=str)
-# Hyperparameters
-parser.add_argument('--use_cross_att', default=False, type=bool)
 # Training parameters
 parser.add_argument('--epoch', default='200', type=int)
 parser.add_argument('--num_sub', default=10, type=int,
@@ -61,6 +53,12 @@ parser.add_argument('--debug', action='store_true', help='If True, will run in d
 parser.add_argument('--disable_wandb', action='store_true', help='If True, will not use wandb.')
 parser.add_argument('--run_group', default=None, type=str, help='Group name for the WandB run.')
 
+# Attention experiment parameters
+parser.add_argument('--use_attn', action='store_true', help='If True, will use attention.')
+parser.add_argument('--att_heads', default=4, type=int, help='Number of attention heads.')
+parser.add_argument('--att_blocks', default=2, type=int, help='Number of attention blocks.')
+parser.add_argument('--att_dropout', default=0.3, type=float, help='Dropout rate for the attention.')
+
 args = parser.parse_args()
 pprint(args)
 
@@ -72,11 +70,15 @@ if args.debug:
     l.basicConfig(level=l.DEBUG, format='%(levelname)s: %(message)s')
     l.debug(">>> Running in DEBUG mode!")
 
-# Import function
+# Seed experiments
 seed_experiments(args.seed)
-run_name = f"{args.dnn}-attn({args.use_cross_att})"
+
+run_name = f"{args.dnn}"
+if args.use_attn:
+    run_name += f"attn(H-{args.att_heads}, B-{args.att_blocks}, DO-{args.att_dropout})"
 if args.debug:
     run_name = "[DEBUG]" + run_name
+
 wandb_login(args.disable_wandb)
 wandb.init(
     entity="EEG_decoder",
@@ -98,17 +100,10 @@ class IE():
         self.batch_size_img = 500 
         self.n_epochs = args.epoch
 
-        self.lambda_cen = 0.003
-
-        # projection layers for both Img and EEG
+        # Dim of projection layers for both Img and EEG + Dim of attention
         self.proj_dim = 768
         self.eeg_proj_do = 0.5
         self.img_proj_do = 0.3
-
-        # cross attention parameters
-        self.att_do = 0.3
-        self.num_heads = 4
-        self.n_att_blocks = 2
 
         self.lr = 0.0002
         self.b1 = 0.5
@@ -122,13 +117,13 @@ class IE():
         self.pretrain = False
 
         os.makedirs(result_path, exist_ok=True)
-        self.log_write = open(os.path.join(result_path, f"log_subject{self.nSub}.txt"), "w")
 
         self.Tensor = torch.FloatTensor
         self.LongTensor = torch.LongTensor
 
-        self.cross_att = CrossAttention(emb_dim = self.proj_dim, num_heads = self.num_heads,
-                                        dropout_p = self.att_do, n_blocks=self.n_att_blocks).to(device)
+        self.Cross_att = CrossAttention(emb_dim = self.proj_dim, num_heads = args.att_heads,
+                                        dropout_p = args.att_dropout, n_blocks=args.att_blocks,
+                                        use_attention=args.use_attn).to(device)
 
         self.criterion_l1 = torch.nn.L1Loss().cuda()
         self.criterion_l2 = torch.nn.MSELoss().cuda()
@@ -141,7 +136,6 @@ class IE():
         # self.Proj_img = nn.DataParallel(self.Proj_img, device_ids=[i for i in range(len(gpus))])
 
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
-        self.centers = {}
         print('initial define done.')
 
 
@@ -184,6 +178,7 @@ class IE():
         self.Enc_eeg.apply(weights_init_normal)
         self.Proj_eeg.apply(weights_init_normal)
         self.Proj_img.apply(weights_init_normal)
+        self.Cross_att.init_weights()
 
         train_eeg, _, test_eeg, test_label = self.get_eeg_data()
         train_img_feature, test_img_feature = self.get_image_data() 
@@ -216,7 +211,7 @@ class IE():
         self.test_dataloader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=self.batch_size_test, shuffle=False)
 
         # Optimizers
-        self.optimizer = torch.optim.Adam(itertools.chain(self.Enc_eeg.parameters(), self.Proj_eeg.parameters(), self.Proj_img.parameters(), self.cross_att.parameters()), 
+        self.optimizer = torch.optim.Adam(itertools.chain(self.Enc_eeg.parameters(), self.Proj_eeg.parameters(), self.Proj_img.parameters(), self.Cross_att.parameters()), 
                                           lr=self.lr, 
                                           betas=(self.b1, self.b2))
 
@@ -224,7 +219,6 @@ class IE():
         best_loss_val = np.inf
 
         for e in range(self.n_epochs):
-            in_epoch = time.time()
             epoch_losses = []
             epoch_losses_eeg = []
             epoch_losses_img = []
@@ -232,8 +226,8 @@ class IE():
             self.Enc_eeg.train()
             self.Proj_eeg.train()
             self.Proj_img.train()
-
-            # starttime_epoch = datetime.datetime.now()
+            self.Cross_att.train()
+            starttime_epoch = time.time()
 
             for i, (eeg, img) in enumerate(self.dataloader):
 
@@ -251,7 +245,7 @@ class IE():
                 img_features = self.Proj_img(img_features) # shape [batch_size, 768]
 
                 # apply cross-attention
-                eeg_features, img_features = self.cross_att(eeg_features, img_features)
+                eeg_features, img_features = self.Cross_att(eeg_features, img_features)
             
                 # normalize the features
                 eeg_features = eeg_features / eeg_features.norm(dim=1, keepdim=True)
@@ -277,22 +271,22 @@ class IE():
                 loss.backward()
                 self.optimizer.step()
 
-
-
             # Log epoch metrics
             avg_epoch_loss = sum(epoch_losses) / len(epoch_losses)
             avg_epoch_loss_eeg = sum(epoch_losses_eeg) / len(epoch_losses_eeg)
             avg_epoch_loss_img = sum(epoch_losses_img) / len(epoch_losses_img)
             wandb.log({
-                "train/loss": avg_epoch_loss,
-                "train/loss_eeg": avg_epoch_loss_eeg,
-                "train/loss_img": avg_epoch_loss_img
+                f"train/loss/subj{self.nSub}": avg_epoch_loss,
+                f"train/loss_eeg/subj{self.nSub}": avg_epoch_loss_eeg,
+                f"train/loss_img/subj{self.nSub}": avg_epoch_loss_img
             })
 
             if (e + 1) % 1 == 0:
                 self.Enc_eeg.eval()
                 self.Proj_eeg.eval()
                 self.Proj_img.eval()
+                self.Cross_att.eval()
+
                 with torch.no_grad():
                     # * validation part
                     val_losses = []
@@ -310,7 +304,7 @@ class IE():
                         vimg_features = self.Proj_img(vimg_features)
                         
                         # Adding cross att
-                        veeg_features, vimg_features = self.cross_att(veeg_features, vimg_features)
+                        veeg_features, vimg_features = self.Cross_att(veeg_features, vimg_features)
 
                         veeg_features = veeg_features / veeg_features.norm(dim=1, keepdim=True)
                         vimg_features = vimg_features / vimg_features.norm(dim=1, keepdim=True)
@@ -331,9 +325,9 @@ class IE():
                     avg_val_loss_eeg = sum(val_losses_eeg) / len(val_losses_eeg)
                     avg_val_loss_img = sum(val_losses_img) / len(val_losses_img)
                     wandb.log({
-                        "val/loss": avg_val_loss,
-                        "val/loss_eeg": avg_val_loss_eeg,
-                        "val/loss_img": avg_val_loss_img
+                        f"val/loss/subj{self.nSub}": avg_val_loss,
+                        f"val/loss_eeg/subj{self.nSub}": avg_val_loss_eeg,
+                        f"val/loss_img/subj{self.nSub}": avg_val_loss_img
                         })
 
                     if vloss <= best_loss_val:
@@ -343,7 +337,7 @@ class IE():
                         print(f"New best epoch - {best_epoch}")
                         # Save models, handling both DataParallel and non-DataParallel cases
                         save_model(self.Enc_eeg, model_checkpoint_path, model_idx)
-                        save_model(self.cross_att, model_checkpoint_path, model_idx)
+                        save_model(self.Cross_att, model_checkpoint_path, model_idx)
                         save_model(self.Proj_eeg, model_checkpoint_path, model_idx)
                         save_model(self.Proj_img, model_checkpoint_path, model_idx)
 
@@ -352,8 +346,9 @@ class IE():
                       '  Cos img: %.4f' % loss_img.detach().cpu().numpy(),
                       '  loss val: %.4f' % vloss.detach().cpu().numpy(),
                       )
-                self.log_write.write('Epoch %d: Cos eeg: %.4f, Cos img: %.4f, loss val: %.4f\n'%(e, loss_eeg.detach().cpu().numpy(), loss_img.detach().cpu().numpy(), vloss.detach().cpu().numpy()))
-
+            
+            endtime_epoch = time.time()
+            print(f"Epoch {e} took {endtime_epoch - starttime_epoch} seconds")
 
         # * test part
         all_center = test_center
@@ -363,12 +358,12 @@ class IE():
         top5 = 0
 
         self.Enc_eeg = load_model(self.Enc_eeg, model_checkpoint_path, model_idx)
-        self.cross_att = load_model(self.cross_att, model_checkpoint_path, model_idx)
+        self.Cross_att = load_model(self.Cross_att, model_checkpoint_path, model_idx)
         self.Proj_eeg = load_model(self.Proj_eeg, model_checkpoint_path, model_idx)
         self.Proj_img = load_model(self.Proj_img, model_checkpoint_path, model_idx)
 
         self.Enc_eeg.eval()
-        self.cross_att.eval()
+        self.Cross_att.eval()
         self.Proj_eeg.eval()
         self.Proj_img.eval()
 
@@ -381,10 +376,10 @@ class IE():
 
                 timg = self.Proj_img(timg)
                 tfea = self.Proj_eeg(self.Enc_eeg(teeg))
-                tfea, timg = self.cross_att(tfea, timg)
+                tfea, timg = self.Cross_att(tfea, timg)
 
                 tfea = tfea / tfea.norm(dim=1, keepdim=True)
-                similarity = (tfea @ timg.t()).softmax(dim=-1)  # no use 100?
+                similarity = (tfea @ timg.t()).softmax(dim=-1)
                 _, indices = similarity.topk(5)
 
                 tt_label = tlabel.view(-1, 1)
@@ -399,14 +394,13 @@ class IE():
             top5_acc = float(top5) / float(total)
 
             wandb.log({
-                "test/top1_accuracy": top1_acc,
-                "test/top3_accuracy": top3_acc,
-                "test/top5_accuracy": top5_acc
+                f"test/top1_accuracy/subj{self.nSub}": top1_acc,
+                f"test/top3_accuracy/subj{self.nSub}": top3_acc,
+                f"test/top5_accuracy/subj{self.nSub}": top5_acc
             })
 
         print('The test Top1-%.6f, Top3-%.6f, Top5-%.6f' % (top1_acc, top3_acc, top5_acc))
-        self.log_write.write('The best epoch is: %d\n' % best_epoch)
-        self.log_write.write('The test Top1-%.6f, Top3-%.6f, Top5-%.6f\n' % (top1_acc, top3_acc, top5_acc))
+        print(f"The best epoch is: {best_epoch}")
         
         return top1_acc, top3_acc, top5_acc
         # writer.close()
@@ -422,7 +416,7 @@ def main():
     for i in range(num_sub):
 
         cal_num += 1
-        starttime = datetime.datetime.now()
+        starttime = time.time()
         seed_n = np.random.randint(args.seed)
 
         print('Subject %d' % (i+1))
@@ -432,8 +426,8 @@ def main():
         print('THE BEST ACCURACY IS ' + str(Acc))
 
 
-        endtime = datetime.datetime.now()
-        print('subject %d duration: '%(i+1) + str(endtime - starttime))
+        endtime = time.time()
+        print('subject %d duration: %.2f minutes' % (i+1, (endtime - starttime) / 60))
 
         aver.append(Acc)
         aver3.append(Acc3)

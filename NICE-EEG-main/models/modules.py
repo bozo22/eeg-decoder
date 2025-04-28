@@ -126,9 +126,9 @@ class CrossAttentionBlock(nn.Module):
             nn.Dropout(dropout_p)
         )
         
-        self._init_weights()
+        self.init_weights()
 
-    def _init_weights(self):
+    def init_weights(self):
         # Initialize attention weights and possibly bias
         for attn in [self.Attention1, self.Attention2]:
             # Initialize the projection matrices with Xavier uniform
@@ -172,9 +172,10 @@ class CrossAttentionBlock(nn.Module):
         return eeg_enc, image_enc
     
 class CrossAttention(nn.Module):
-    def __init__(self, emb_dim, num_heads, dropout_p, n_blocks):
+    def __init__(self, emb_dim, num_heads, dropout_p, n_blocks, use_attention=True):
         super().__init__()
         
+        self.use_attention = use_attention
         attention_blocks = []
         for i in range(n_blocks):
             attention_blocks.append(CrossAttentionBlock(emb_dim, num_heads, dropout_p))
@@ -189,11 +190,16 @@ class CrossAttention(nn.Module):
         # )
     
     def forward(self, eeg_enc, image_enc):
-        eeg_enc, image_enc = self.attention_blocks(eeg_enc, image_enc)
+        if self.use_attention:
+            eeg_enc, image_enc = self.attention_blocks(eeg_enc, image_enc)
         # eeg_enc = torch.cat((eeg_enc, image_enc), -1)
         # eeg_enc = self.mlp(eeg_enc)
 
         return eeg_enc, image_enc
+    
+    def init_weights(self):
+        for block in self.attention_blocks:
+            block.init_weights()
     
 class mySequential(nn.Sequential):
     def forward(self, *input):
