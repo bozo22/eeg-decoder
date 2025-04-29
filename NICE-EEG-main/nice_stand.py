@@ -88,6 +88,10 @@ wandb.init(
     mode="disabled" if args.disable_wandb else "online",
     group=args.run_group
 )
+wandb.define_metric("epoch")
+wandb.define_metric("train/*", step_metric="epoch")
+wandb.define_metric("val/*", step_metric="epoch")
+# sweep_configuration = read_sweep_config("NICE-EEG-main/sweep_config.yaml")
 
 # Image2EEG
 class IE():
@@ -276,6 +280,7 @@ class IE():
             avg_epoch_loss_eeg = sum(epoch_losses_eeg) / len(epoch_losses_eeg)
             avg_epoch_loss_img = sum(epoch_losses_img) / len(epoch_losses_img)
             wandb.log({
+                "epoch": e + 1,
                 f"train/loss/subj{self.nSub}": avg_epoch_loss,
                 f"train/loss_eeg/subj{self.nSub}": avg_epoch_loss_eeg,
                 f"train/loss_img/subj{self.nSub}": avg_epoch_loss_img
@@ -325,6 +330,7 @@ class IE():
                     avg_val_loss_eeg = sum(val_losses_eeg) / len(val_losses_eeg)
                     avg_val_loss_img = sum(val_losses_img) / len(val_losses_img)
                     wandb.log({
+                        "epoch": e + 1,
                         f"val/loss/subj{self.nSub}": avg_val_loss,
                         f"val/loss_eeg/subj{self.nSub}": avg_val_loss_eeg,
                         f"val/loss_img/subj{self.nSub}": avg_val_loss_img
