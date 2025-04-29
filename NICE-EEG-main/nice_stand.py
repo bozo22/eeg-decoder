@@ -28,7 +28,6 @@ from utils.utils import load_model, save_model, seed_experiments, wandb_login
 NICE_path = os.path.dirname(os.path.abspath(__file__))
 result_path = os.path.join(NICE_path, 'results')
 model_checkpoint_path = os.path.join(result_path, 'checkpoints')
-model_idx = 'test0'
 
 
 parser = argparse.ArgumentParser(description='Experiment Stimuli Recognition test with CLIP encoder')
@@ -54,6 +53,7 @@ parser.add_argument('--disable_wandb', action='store_true', help='If True, will 
 parser.add_argument('--run_group', default=None, type=str, help='Group name for the WandB run.')
 
 # Attention experiment parameters
+parser.add_argument('--lr', default=0.0002, type=float, help='Learning rate.')
 parser.add_argument('--use_attn', action='store_true', help='If True, will use attention.')
 parser.add_argument('--att_heads', default=4, type=int, help='Number of attention heads.')
 parser.add_argument('--att_blocks', default=2, type=int, help='Number of attention blocks.')
@@ -73,7 +73,7 @@ if args.debug:
 # Seed experiments
 seed_experiments(args.seed)
 
-run_name = f"{args.dnn}"
+run_name = f"{args.dnn}-lr({args.lr})"
 if args.use_attn:
     run_name += f"attn(H-{args.att_heads}, B-{args.att_blocks}, DO-{args.att_dropout})"
 if args.debug:
@@ -109,7 +109,7 @@ class IE():
         self.eeg_proj_do = 0.5
         self.img_proj_do = 0.3
 
-        self.lr = 0.0002
+        self.lr = args.lr
         self.b1 = 0.5
         self.b2 = 0.999
         self.nSub = nsub
@@ -342,19 +342,19 @@ class IE():
                         os.makedirs(model_checkpoint_path, exist_ok=True)
                         print(f"New best epoch - {best_epoch}")
                         # Save models, handling both DataParallel and non-DataParallel cases
-                        save_model(self.Enc_eeg, model_checkpoint_path, model_idx)
-                        save_model(self.Cross_att, model_checkpoint_path, model_idx)
-                        save_model(self.Proj_eeg, model_checkpoint_path, model_idx)
-                        save_model(self.Proj_img, model_checkpoint_path, model_idx)
+                        save_model(self.Enc_eeg, model_checkpoint_path, run_name)
+                        save_model(self.Cross_att, model_checkpoint_path, run_name)
+                        save_model(self.Proj_eeg, model_checkpoint_path, run_name)
+                        save_model(self.Proj_img, model_checkpoint_path, run_name)
 
-                print('Epoch:', e,
+                print('Epoch:', e + 1,
                       '  Cos eeg: %.4f' % loss_eeg.detach().cpu().numpy(),
                       '  Cos img: %.4f' % loss_img.detach().cpu().numpy(),
                       '  loss val: %.4f' % vloss.detach().cpu().numpy(),
                       )
             
             endtime_epoch = time.time()
-            print(f"Epoch {e} took {endtime_epoch - starttime_epoch} seconds")
+            print(f"Epoch {e + 1} took {endtime_epoch - starttime_epoch} seconds")
 
         # * test part
         all_center = test_center
@@ -363,10 +363,10 @@ class IE():
         top3 = 0
         top5 = 0
 
-        self.Enc_eeg = load_model(self.Enc_eeg, model_checkpoint_path, model_idx)
-        self.Cross_att = load_model(self.Cross_att, model_checkpoint_path, model_idx)
-        self.Proj_eeg = load_model(self.Proj_eeg, model_checkpoint_path, model_idx)
-        self.Proj_img = load_model(self.Proj_img, model_checkpoint_path, model_idx)
+        self.Enc_eeg = load_model(self.Enc_eeg, model_checkpoint_path, run_name)
+        self.Cross_att = load_model(self.Cross_att, model_checkpoint_path, run_name)
+        self.Proj_eeg = load_model(self.Proj_eeg, model_checkpoint_path, run_name)
+        self.Proj_img = load_model(self.Proj_img, model_checkpoint_path, run_name)
 
         self.Enc_eeg.eval()
         self.Cross_att.eval()
