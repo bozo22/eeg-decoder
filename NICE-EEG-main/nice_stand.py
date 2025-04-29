@@ -60,27 +60,25 @@ parser.add_argument('--att_blocks', default=2, type=int, help='Number of attenti
 parser.add_argument('--att_dropout', default=0.3, type=float, help='Dropout rate for the attention.')
 
 args = parser.parse_args()
-pprint(args)
-
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() and args.device == 'gpu' else 'cpu')
 print(f'Using device: {device}')
-
+# Set debug logger, if debug is True
 if args.debug:
     l.basicConfig(level=l.DEBUG, format='%(levelname)s: %(message)s')
     l.debug(">>> Running in DEBUG mode!")
 
 # Seed experiments
 seed_experiments(args.seed)
-
+# Prepare run name
 run_name = f"{args.dnn}-lr({args.lr})"
 if args.use_attn:
     run_name += f"attn(H-{args.att_heads}, B-{args.att_blocks}, DO-{args.att_dropout})"
 if args.debug:
     run_name = "[DEBUG]" + run_name
-
+# WandB setup
 wandb_login(args.disable_wandb)
-wandb.init(
+run = wandb.init(
     entity="EEG_decoder",
     project="EEG-Decoder",
     name=run_name,
@@ -88,6 +86,9 @@ wandb.init(
     mode="disabled" if args.disable_wandb else "online",
     group=args.run_group
 )
+for k, v in run.config.items():
+    setattr(args, k, v)
+pprint(args)
 wandb.define_metric("epoch")
 wandb.define_metric("train/*", step_metric="epoch")
 wandb.define_metric("val/*", step_metric="epoch")
@@ -474,7 +475,7 @@ def main():
     pd_all = pd.DataFrame(columns=column, data=[aver, aver3, aver5])
     pd_all.to_csv(os.path.join(result_path, 'train_results.csv'))
     
-    wandb.finish()
+    run.finish()
 
 if __name__ == "__main__":
     print(time.asctime(time.localtime(time.time())))
