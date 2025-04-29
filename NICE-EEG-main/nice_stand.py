@@ -399,13 +399,8 @@ class IE():
             top3_acc = float(top3) / float(total)
             top5_acc = float(top5) / float(total)
 
-            wandb.log({
-                f"test/top1_accuracy/subj{self.nSub}": top1_acc,
-                f"test/top3_accuracy/subj{self.nSub}": top3_acc,
-                f"test/top5_accuracy/subj{self.nSub}": top5_acc
-            })
 
-        print('The test Top1-%.6f, Top3-%.6f, Top5-%.6f' % (top1_acc, top3_acc, top5_acc))
+        print(f'>> Subject {self.nSub} - The test Top1-%.6f, Top3-%.6f, Top5-%.6f' % (top1_acc, top3_acc, top5_acc))
         print(f"The best epoch is: {best_epoch}")
         
         return top1_acc, top3_acc, top5_acc
@@ -431,7 +426,6 @@ def main():
         Acc, Acc3, Acc5 = ie.train()
         print('THE BEST ACCURACY IS ' + str(Acc))
 
-
         endtime = time.time()
         print('subject %d duration: %.2f minutes' % (i+1, (endtime - starttime) / 60))
 
@@ -442,6 +436,15 @@ def main():
     aver.append(np.mean(aver))
     aver3.append(np.mean(aver3))
     aver5.append(np.mean(aver5))
+
+    for i in range(len(aver)):
+        if i == len(aver)-1:
+            subj = 'ave'
+        else:
+            subj = f'Subject {i+1}'
+        wandb.run.summary[f"{subj}/top1"] = aver[i]
+        wandb.run.summary[f"{subj}/top3"] = aver3[i]
+        wandb.run.summary[f"{subj}/top5"] = aver5[i]
 
     column = np.arange(1, cal_num+1).tolist()
     column.append('ave')

@@ -15,10 +15,10 @@ def seed_experiments(seed):
     torch.backends.cudnn.benchmark = False
 
 
-def save_model(model, chekpoint_path, model_idx):
+def save_model(model, chekpoint_path, run_name):
     model_name = model.module.__class__.__name__ if isinstance(model, nn.DataParallel) else model.__class__.__name__
     model_state_dict = model.state_dict() if not isinstance(model, nn.DataParallel) else model.module.state_dict()
-    save_path = os.path.join(chekpoint_path, f"{model_name}-{model_idx}.pth")
+    save_path = os.path.join(chekpoint_path, f"{model_name}-{run_name}.pth")
     torch.save(model_state_dict, save_path)
     print(f"Model {model_name} saved to {save_path}")
 
