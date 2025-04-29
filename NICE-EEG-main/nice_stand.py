@@ -221,6 +221,7 @@ class IE():
 
         num = 0
         best_loss_val = np.inf
+        train_results = np.zeros((2, self.n_epochs, 3)) # dim1 - for train/val, dim2 - for epoch, dim3 - for loss/loss_eeg/loss_img
 
         for e in range(self.n_epochs):
             epoch_losses = []
@@ -285,6 +286,9 @@ class IE():
                 f"train/loss_eeg/subj{self.nSub}": avg_epoch_loss_eeg,
                 f"train/loss_img/subj{self.nSub}": avg_epoch_loss_img
             })
+            train_results[0, e, 0] = avg_epoch_loss
+            train_results[0, e, 1] = avg_epoch_loss_eeg
+            train_results[0, e, 2] = avg_epoch_loss_img
 
             if (e + 1) % 1 == 0:
                 self.Enc_eeg.eval()
@@ -335,7 +339,9 @@ class IE():
                         f"val/loss_eeg/subj{self.nSub}": avg_val_loss_eeg,
                         f"val/loss_img/subj{self.nSub}": avg_val_loss_img
                         })
-
+                    train_results[1, e, 0] = avg_val_loss
+                    train_results[1, e, 1] = avg_val_loss_eeg
+                    train_results[1, e, 2] = avg_val_loss_img
                     if vloss <= best_loss_val:
                         best_loss_val = vloss
                         best_epoch = e + 1
@@ -403,13 +409,14 @@ class IE():
         print(f'>> Subject {self.nSub} - The test Top1-%.6f, Top3-%.6f, Top5-%.6f' % (top1_acc, top3_acc, top5_acc))
         print(f"The best epoch is: {best_epoch}")
         
-        return top1_acc, top3_acc, top5_acc
+        return top1_acc, top3_acc, top5_acc, train_results
         # writer.close()
 
 
 def main():
     num_sub = args.num_sub   
     cal_num = 0
+    avg_train_results = []
     aver = []
     aver3 = []
     aver5 = []
@@ -423,7 +430,7 @@ def main():
         print('Subject %d' % (i+1))
         ie = IE(args, i + 1)
 
-        Acc, Acc3, Acc5 = ie.train()
+        Acc, Acc3, Acc5, train_results = ie.train()
         print('THE BEST ACCURACY IS ' + str(Acc))
 
         endtime = time.time()
@@ -433,6 +440,22 @@ def main():
         aver3.append(Acc3)
         aver5.append(Acc5)
 
+        avg_train_results.append(train_results)
+                
+
+    # Compute and log average train results
+    avg_train_results = np.mean(avg_train_results, axis=0) # size: (2, epochs, 3)
+    for i in range(len(avg_train_results)):
+        mode = 'train' if i == 0 else 'val'
+        for e in range(len(avg_train_results[i])):
+            epoch = e + 1
+            for k in range(len(avg_train_results[i][e])):
+                metric = 'loss' if k == 0 else 'loss_eeg' if k == 1 else 'loss_img'
+                wandb.log({
+                    "epoch": epoch,
+                    f"{mode}/{metric}": avg_train_results[i][e][k]
+                })
+    # Compute and log test results
     aver.append(np.mean(aver))
     aver3.append(np.mean(aver3))
     aver5.append(np.mean(aver5))
