@@ -107,22 +107,25 @@ class CrossAttentionBlock(nn.Module):
 
         self.Attention1 = nn.MultiheadAttention(emb_dim, num_heads, dropout = dropout_p)
         self.Attention2 = nn.MultiheadAttention(emb_dim, num_heads, dropout = dropout_p)
-        self.linear_expansion_factor = 4 * emb_dim
+        self.linear_expansion_dim = 4 * emb_dim
 
+        # Add positional embeddings to EEG features
+        self.pos_embedding = nn.Parameter(torch.randn(1, emb_dim))
+        
         self.layer_norm11 = nn.RMSNorm(emb_dim)
         self.layer_norm12 = nn.RMSNorm(emb_dim)
         self.layer_norm21 = nn.RMSNorm(emb_dim)
         self.layer_norm22 = nn.RMSNorm(emb_dim)
         self.mlp1 = nn.Sequential(
-            nn.Linear(emb_dim, self.linear_expansion_factor),
+            nn.Linear(emb_dim, self.linear_expansion_dim),
             nn.GELU(),
-            nn.Linear(self.linear_expansion_factor, emb_dim),
+            nn.Linear(self.linear_expansion_dim, emb_dim),
             nn.Dropout(dropout_p)
         )
         self.mlp2 = nn.Sequential(
-            nn.Linear(emb_dim, emb_dim),
+            nn.Linear(emb_dim, self.linear_expansion_dim),
             nn.GELU(),
-            nn.Linear(emb_dim, emb_dim),
+            nn.Linear(self.linear_expansion_dim, emb_dim),
             nn.Dropout(dropout_p)
         )
         
@@ -176,33 +179,20 @@ class CrossAttention(nn.Module):
         super().__init__()
         
         self.use_attention = use_attention
-        attention_blocks = []
-        for i in range(n_blocks):
-            attention_blocks.append(CrossAttentionBlock(emb_dim, num_heads, dropout_p))
-        self.attention_blocks = mySequential(*attention_blocks)
+        if self.use_attention:
+            attention_blocks = []
+            for i in range(n_blocks):
+                attention_blocks.append(CrossAttentionBlock(emb_dim, num_heads, dropout_p))
+            self.attention_blocks = nn.Sequential(*attention_blocks)
+        else:
+            self.attention_blocks = nn.Identity()
 
-        # Project the concatenation of both EEG & img features (2 * emb_dim) into the final emb_dim
-        # self.mlp = nn.Sequential(
-        #     nn.Linear(emb_dim *2, emb_dim),
-        #     nn.GELU(),
-        #     nn.Linear(emb_dim, emb_dim),
-        #     nn.Dropout(dropout_p)
-        # )
     
     def forward(self, eeg_enc, image_enc):
-        if self.use_attention:
-            eeg_enc, image_enc = self.attention_blocks(eeg_enc, image_enc)
-        # eeg_enc = torch.cat((eeg_enc, image_enc), -1)
-        # eeg_enc = self.mlp(eeg_enc)
-
+        eeg_enc, image_enc = self.attention_blocks((eeg_enc, image_enc))
         return eeg_enc, image_enc
     
     def init_weights(self):
-        for block in self.attention_blocks:
-            block.init_weights()
-    
-class mySequential(nn.Sequential):
-    def forward(self, *input):
-        for module in self._modules.values():
-            input = module(*input)
-        return input
+        if self.use_attention:
+            for block in self.attention_blocks:
+                block.init_weights()

@@ -58,6 +58,7 @@ parser.add_argument('--use_attn', action='store_true', help='If True, will use a
 parser.add_argument('--att_heads', default=4, type=int, help='Number of attention heads.')
 parser.add_argument('--att_blocks', default=2, type=int, help='Number of attention blocks.')
 parser.add_argument('--att_dropout', default=0.3, type=float, help='Dropout rate for the attention.')
+parser.add_argument('--proj_dim', default=768, type=int, help='Dimension of the projected features + attention embeddings.')
 
 args = parser.parse_args()
 # Set device
@@ -70,18 +71,12 @@ if args.debug:
 
 # Seed experiments
 seed_experiments(args.seed)
-# Prepare run name
-run_name = f"{args.dnn}-lr({args.lr})"
-if args.use_attn:
-    run_name += f"attn(H-{args.att_heads}, B-{args.att_blocks}, DO-{args.att_dropout})"
-if args.debug:
-    run_name = "[DEBUG]" + run_name
+
 # WandB setup
 wandb_login(args.disable_wandb)
 run = wandb.init(
     entity="EEG_decoder",
     project="EEG-Decoder",
-    name=run_name,
     config=vars(args),
     mode="disabled" if args.disable_wandb else "online",
     group=args.run_group
@@ -89,10 +84,16 @@ run = wandb.init(
 for k, v in run.config.items():
     setattr(args, k, v)
 pprint(args)
+# Prepare run name
+run_name = f"lr({args.lr})"
+if args.use_attn:
+    run_name += f"attn(H-{args.att_heads}, B-{args.att_blocks}, DO-{args.att_dropout})"
+if args.debug:
+    run_name = "[DEBUG]" + run_name
+run.name = run_name
 wandb.define_metric("epoch")
 wandb.define_metric("train/*", step_metric="epoch")
 wandb.define_metric("val/*", step_metric="epoch")
-# sweep_configuration = read_sweep_config("NICE-EEG-main/sweep_config.yaml")
 
 # Image2EEG
 class IE():
@@ -106,7 +107,7 @@ class IE():
         self.n_epochs = args.epoch
 
         # Dim of projection layers for both Img and EEG + Dim of attention
-        self.proj_dim = 768
+        self.proj_dim = args.proj_dim
         self.eeg_proj_do = 0.5
         self.img_proj_do = 0.3
 
