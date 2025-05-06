@@ -50,8 +50,13 @@ parser.add_argument('--dataset_path', default='Things-EEG2/Preprocessed_data_250
 parser.add_argument('--device', default='gpu', type=str, choices=['gpu', 'cpu'], help='Device to use for training.')
 parser.add_argument('--mixup', action='store_true', help='Use mixup data augmentation')
 parser.add_argument('--mixup-alpha', type=float, default=0.2, help='Mixup alpha parameter')
+parser.add_argument('--mixup_in_class', action='store_true', help='Use mixup data augmentation within the same class')
 
 args = parser.parse_args()
+
+if args.mixup and args.mixup_in_class:
+    raise ValueError("Cannot use both mixup across classes and mixup within the same class. Please choose one.")
+
 pprint(args)
 
 # Set device
@@ -167,9 +172,11 @@ class IE():
         self.batch_size_test = 400
         self.batch_size_img = 500 
         self.n_epochs = args.epoch
+        self.val_set_size = 740
 
         self.use_mixup = args.mixup
         self.mixup_alpha = args.mixup_alpha
+        self.use_mixup_in_class = args.mixup_in_class
 
         self.lambda_cen = 0.003
         self.alpha = 0.5
@@ -239,6 +246,23 @@ class IE():
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
 
+    def mixup(self, eeg, img_features):
+        if type(eeg) is not Tensor:
+            eeg = torch.from_numpy(eeg)
+            img_features = torch.from_numpy(img_features)
+            eeg = eeg.type(self.Tensor).to(device)
+            img_features = img_features.type(self.Tensor).to(device)
+
+        batch_size = eeg.shape[0]
+        index = torch.randperm(batch_size).to(device)
+        lam = np.random.beta(self.mixup_alpha, self.mixup_alpha)
+        
+        # Mix both modalities consistently
+        mixed_eeg = lam * eeg + (1 - lam) * eeg[index]
+        mixed_img_features = lam * img_features + (1 - lam) * img_features[index]
+        
+        return mixed_eeg, mixed_img_features
+
 
     def train(self):
         
@@ -250,17 +274,45 @@ class IE():
         train_img_feature, _ = self.get_image_data() 
         test_center = np.load(self.test_center_path + 'center_' + self.args.dnn + '.npy', allow_pickle=True)
 
+        # already ensured only one of the self.use_mixup and self.use_mixup_in_class is True
+        if self.use_mixup_in_class:
+            # mixup in class
+            train_classes = train_eeg.shape[0] // args.num_sub
+
+            mixed_eeg_list = []
+            mixed_img_list = []
+
+            for cls in range(train_classes):
+                start = cls * args.num_sub
+                end   = (cls + 1) * args.num_sub
+
+                eeg_slice = train_eeg[start:end]
+                img_slice = train_img_feature[start:end]
+
+                mixed_eeg, mixed_img_features = self.mixup(eeg_slice, img_slice)    
+
+                mixed_eeg_list.append(mixed_eeg.cpu().numpy())
+                mixed_img_list.append(mixed_img_features.cpu().numpy())
+
+            mixed_eeg_array = np.concatenate(mixed_eeg_list, axis=0)
+            mixed_img_array = np.concatenate(mixed_img_list, axis=0)
+            train_eeg = np.concatenate((train_eeg, mixed_eeg_array), axis=0)
+            train_img_feature = np.concatenate((train_img_feature, mixed_img_array), axis=0)
+
+            print(f"After mixup, train_eeg shape: {train_eeg.shape}, train_img_feature shape: {train_img_feature.shape}")
+
+            self.val_set_size = int(self.val_set_size * 2)
+
         # shuffle the training data
         train_shuffle = np.random.permutation(len(train_eeg))
         train_eeg = train_eeg[train_shuffle]
         train_img_feature = train_img_feature[train_shuffle]
 
-        val_eeg = torch.from_numpy(train_eeg[:740])
-        val_image = torch.from_numpy(train_img_feature[:740])
+        val_eeg = torch.from_numpy(train_eeg[:self.val_set_size])
+        val_image = torch.from_numpy(train_img_feature[:self.val_set_size])
 
-        train_eeg = torch.from_numpy(train_eeg[740:])
-        train_image = torch.from_numpy(train_img_feature[740:])
-
+        train_eeg = torch.from_numpy(train_eeg[self.val_set_size:])
+        train_image = torch.from_numpy(train_img_feature[self.val_set_size:])
 
         dataset = torch.utils.data.TensorDataset(train_eeg, train_image)
         self.dataloader = torch.utils.data.DataLoader(dataset=dataset, batch_size=self.batch_size, shuffle=True)
@@ -290,10 +342,19 @@ class IE():
             # starttime_epoch = datetime.datetime.now()
 
             for i, (eeg, img) in enumerate(self.dataloader):
-                
+
                 # img = Variable(img.cuda().type(self.Tensor))
                 eeg = eeg.type(self.Tensor).to(device)
                 img_features = img.type(self.Tensor).to(device)
+
+                if self.use_mixup:
+                    # Apply mixup to both EEG and image features using the same permutation and lambda
+                    # This maintains correspondence between mixed samples
+                    mixed_eeg, mixed_img_features = self.mixup(eeg, img_features)
+
+                    eeg = torch.concatenate((eeg, mixed_eeg), axis=0)
+                    img_features = torch.concatenate((img_features, mixed_img_features), axis=0)
+                    
                 labels = torch.arange(eeg.shape[0])  # used for the loss
                 labels = labels.type(self.LongTensor).to(device)
                 
