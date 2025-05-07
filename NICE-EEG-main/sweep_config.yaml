@@ -4,7 +4,7 @@ command:                     # anything *not* swept stays fixed
   - python
   - ${program}
   - --dataset_path
-  - /scratch-shared/scur0549/datasets/Things-EEG2/Preprocessed_data_250Hz/
+  - /scratch-shared/scur0549/datasets/Things-EEG2/
   - --use_attn
   - --image_features_type
   - hidden_states
