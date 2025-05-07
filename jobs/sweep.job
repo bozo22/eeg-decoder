@@ -5,7 +5,7 @@
 #SBATCH --job-name=Sweep
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=18
-#SBATCH --time=12:00:00
+#SBATCH --time=4:00:00
 #SBATCH --output=/home/scur0549/logs/out-%x.%A.out
 #SBATCH --error=/home/scur0549/logs/err-%x.%A.err
 
@@ -25,4 +25,4 @@ export PYTHONUNBUFFERED=1
 
 cd $HOME/eeg-decoder
 # Go to the directory that contains the project, the runnable
-wandb agent --count 5 EEG_decoder/EEG-Decoder/5l3n637z
+wandb agent --count 1 EEG_decoder/EEG-Decoder/5l3n637z

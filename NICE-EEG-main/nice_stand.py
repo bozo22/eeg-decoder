@@ -36,8 +36,7 @@ parser.add_argument('--dnn', default='clip', type=str)
 parser.add_argument('--epoch', default='200', type=int)
 parser.add_argument('--num_sub', default=10, type=int,
                     help='number of subjects used in the experiments. ')
-parser.add_argument('-batch_size', '--batch-size', default=1000, type=int,
-                    metavar='N',
+parser.add_argument('--batch_size', default=1000, type=int,
                     help='mini-batch size, this is the total '
                          'batch size of all GPUs on the current node when '
                          'using Data Parallel or Distributed Data Parallel')
