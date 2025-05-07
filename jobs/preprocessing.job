@@ -5,7 +5,7 @@
 #SBATCH --job-name=Preprocessing
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=18
-#SBATCH --time=02:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=/home/scur0549/logs/out-%x.%A.out
 #SBATCH --error=/home/scur0549/logs/err-%x.%A.err
 
@@ -19,4 +19,9 @@ source activate eeg-decoder
 
 # Go to the directory that contains the project, the runnable
 cd $HOME/eeg-decoder
-srun python -O NICE-EEG-main/preprocessing/preprocessing.py --project_dir /scratch-shared/$USER/datasets/Things-EEG2
+# To preprocess the EEG data
+# srun python -O NICE-EEG-main/preprocessing/preprocessing.py --project_dir /scratch-shared/$USER/datasets/Things-EEG2
+
+# To extract the feature maps
+srun python -O NICE-EEG-main/preprocessing/obtain_feature_maps_clip.py --project_dir /scratch-shared/$USER/datasets/Things-EEG2/Image_set --feature_type final_embedding
+srun python -O NICE-EEG-main/preprocessing/obtain_feature_maps_clip.py --project_dir /scratch-shared/$USER/datasets/Things-EEG2/Image_set --feature_type hidden_states
