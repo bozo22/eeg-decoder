@@ -8,6 +8,10 @@ command:                     # anything *not* swept stays fixed
   - --use_attn
   - --image_features_type
   - hidden_states
+  - --batch_size
+  - 512
+  - --epoch
+  - 100
 
 method: bayes                # or "random", "grid", "asha"
 metric:
@@ -17,7 +21,7 @@ metric:
 parameters:
   lr:
     distribution: log_uniform_values
-    min: 1e-8
+    min: 1e-9
     max: 1e-4
   proj_dim:
     values: [128, 512, 768, 1024]
