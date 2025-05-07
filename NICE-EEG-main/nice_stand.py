@@ -6,7 +6,6 @@ use 250 Hz data
 
 import os
 import argparse
-import itertools
 import time
 import numpy as np
 import pandas as pd
@@ -17,11 +16,11 @@ import wandb
 import torch
 import torch.nn as nn
 
-from torch.utils.data import Subset
-
-from models.modules import weights_init_normal, Enc_eeg, Proj_eeg, Proj_img, CrossAttention
+from functools import partialmethod
+from tqdm import tqdm
+from models.SuperNICE import SuperNICE
 from utils.utils import load_model, save_model, seed_experiments, wandb_login
-
+from utils.dataset import get_dataloaders
 # gpus = [0]
 # os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
 # os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(map(str, gpus))
@@ -39,10 +38,15 @@ parser.add_argument('--num_sub', default=10, type=int,
                     help='number of subjects used in the experiments. ')
 parser.add_argument('-batch_size', '--batch-size', default=1000, type=int,
                     metavar='N',
-                    help='mini-batch size (default: 256), this is the total '
+                    help='mini-batch size, this is the total '
                          'batch size of all GPUs on the current node when '
                          'using Data Parallel or Distributed Data Parallel')
-parser.add_argument('--dataset_path', default='Things-EEG2/Preprocessed_data_250Hz/', type=str, help='Path to the dataset. ')
+parser.add_argument('--dataset_path', default='Things-EEG2/', type=str, help='Path to the dataset. ')
+parser.add_argument('--image_features_type', default='final_embedding', choices=['final_embedding', 'hidden_states'], 
+					help="""
+                    Type of image features to use. 
+					For final_embedding, the image features are the image embeddings from the shared CLIP subspace where the contrastive loss is computed - 1-D (768). 
+					For hidden_states, the image features are all the hidden states of the last layer - 2-D (257, 1024).""")
 # Auxiliary parameters
 parser.add_argument('--seed', default=2023, type=int,
                     help='seed for initializing training. ')
@@ -52,9 +56,9 @@ parser.add_argument('--debug', action='store_true', help='If True, will run in d
 parser.add_argument('--disable_wandb', action='store_true', help='If True, will not use wandb.')
 parser.add_argument('--run_group', default=None, type=str, help='Group name for the WandB run.')
 
-# Attention experiment parameters
-parser.add_argument('--lr', default=0.0002, type=float, help='Learning rate.')
+# Experiment parameters
 parser.add_argument('--use_attn', action='store_true', help='If True, will use attention.')
+parser.add_argument('--lr', default=0.0002, type=float, help='Learning rate.')
 parser.add_argument('--att_heads', default=4, type=int, help='Number of attention heads.')
 parser.add_argument('--att_blocks', default=2, type=int, help='Number of attention blocks.')
 parser.add_argument('--att_dropout', default=0.3, type=float, help='Dropout rate for the attention.')
@@ -68,6 +72,7 @@ print(f'Using device: {device}')
 if args.debug:
     l.basicConfig(level=l.DEBUG, format='%(levelname)s: %(message)s')
     l.debug(">>> Running in DEBUG mode!")
+tqdm.__init__ = partialmethod(tqdm.__init__, disable=False if args.debug else True)
 
 # Seed experiments
 seed_experiments(args.seed)
@@ -106,73 +111,28 @@ class IE():
         self.batch_size_img = 500 
         self.n_epochs = args.epoch
 
-        # Dim of projection layers for both Img and EEG + Dim of attention
-        self.proj_dim = args.proj_dim
-        self.eeg_proj_do = 0.5
-        self.img_proj_do = 0.3
-
+        # Optimizer parameters
         self.lr = args.lr
         self.b1 = 0.5
         self.b2 = 0.999
         self.nSub = nsub
 
         self.start_epoch = 0
-        self.eeg_data_path = args.dataset_path
-        self.img_data_path = os.path.join(NICE_path, 'dnn_feature/')
-        self.test_center_path = os.path.join(NICE_path, 'dnn_feature/')
-        self.pretrain = False
+        self.eeg_data_path = os.path.join(args.dataset_path, 'Preprocessed_data_250Hz')
+        self.img_data_path = os.path.join(args.dataset_path, 'image_features', args.image_features_type, args.dnn)
 
         os.makedirs(result_path, exist_ok=True)
 
-        self.Tensor = torch.FloatTensor
-        self.LongTensor = torch.LongTensor
+        self.model = SuperNICE(args)
+        self.model.to(device)
 
-        self.Cross_att = CrossAttention(emb_dim = self.proj_dim, num_heads = args.att_heads,
-                                        dropout_p = args.att_dropout, n_blocks=args.att_blocks,
-                                        use_attention=args.use_attn).to(device)
-
-        self.criterion_l1 = torch.nn.L1Loss().cuda()
-        self.criterion_l2 = torch.nn.MSELoss().cuda()
+        # self.criterion_l1 = torch.nn.L1Loss().cuda()
+        # self.criterion_l2 = torch.nn.MSELoss().cuda()
         self.criterion_cls = torch.nn.CrossEntropyLoss().to(device)
-        self.Enc_eeg = Enc_eeg().to(device)
-        self.Proj_eeg = Proj_eeg(proj_dim = self.proj_dim, drop_proj = self.eeg_proj_do).to(device)
-        self.Proj_img = Proj_img(proj_dim = self.proj_dim, drop_proj = self.img_proj_do).to(device)
-        # self.Enc_eeg = nn.DataParallel(self.Enc_eeg, device_ids=[i for i in range(len(gpus))])
-        # self.Proj_eeg = nn.DataParallel(self.Proj_eeg, device_ids=[i for i in range(len(gpus))])
-        # self.Proj_img = nn.DataParallel(self.Proj_img, device_ids=[i for i in range(len(gpus))])
 
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         print('initial define done.')
 
-
-    def get_eeg_data(self):
-        train_data = []
-        train_label = []
-        test_data = []
-        test_label = np.arange(200)
-
-        train_data = np.load(os.path.join(self.eeg_data_path, 'sub-' + format(self.nSub, '02'), 'preprocessed_eeg_training.npy'), allow_pickle=True)
-        train_data = train_data['preprocessed_eeg_data']
-        # Average across repetitions
-        train_data = np.mean(train_data, axis=1) # Shape: (total_nr_train_imgs x 1 x channels x 250)
-        train_data = np.expand_dims(train_data, axis=1)
-
-        test_data = np.load(self.eeg_data_path + '/sub-' + format(self.nSub, '02') + '/preprocessed_eeg_test.npy', allow_pickle=True)
-        test_data = test_data['preprocessed_eeg_data']
-        # Average across repetitions
-        test_data = np.mean(test_data, axis=1) # Shape: (total_nr_test_imgs x 1 x channels x 250)
-        test_data = np.expand_dims(test_data, axis=1)
-
-        return train_data, train_label, test_data, test_label
-
-    def get_image_data(self):
-        train_img_feature = np.load(self.img_data_path + self.args.dnn + '_feature_maps_training.npy', allow_pickle=True)
-        test_img_feature = np.load(self.img_data_path + self.args.dnn + '_feature_maps_test.npy', allow_pickle=True)
-
-        train_img_feature = np.squeeze(train_img_feature)
-        test_img_feature = np.squeeze(test_img_feature)
-
-        return train_img_feature, test_img_feature
         
     def update_lr(self, optimizer, lr):
         for param_group in optimizer.param_groups:
@@ -181,43 +141,20 @@ class IE():
 
     def train(self):
         
-        self.Enc_eeg.apply(weights_init_normal)
-        self.Proj_eeg.apply(weights_init_normal)
-        self.Proj_img.apply(weights_init_normal)
-        self.Cross_att.init_weights()
+        self.model.init_weights()
 
-        train_eeg, _, test_eeg, test_label = self.get_eeg_data()
-        train_img_feature, test_img_feature = self.get_image_data() 
-        test_center = np.load(self.test_center_path + 'center_' + self.args.dnn + '.npy', allow_pickle=True)
-
-        # shuffle the training data
-        train_shuffle = np.random.permutation(len(train_eeg))
-        train_eeg = train_eeg[train_shuffle]
-        train_img_feature = train_img_feature[train_shuffle]
-
-        val_eeg = torch.from_numpy(train_eeg[:740])
-        val_image = torch.from_numpy(train_img_feature[:740])
-
-        train_eeg = torch.from_numpy(train_eeg[740:])
-        train_image = torch.from_numpy(train_img_feature[740:])
-
-        dataset = torch.utils.data.TensorDataset(train_eeg, train_image)
-        if args.debug:
-            l.debug("Using only 100 samples from the dataset")
-            dataset = Subset(dataset, range(100))
-        self.dataloader = torch.utils.data.DataLoader(dataset=dataset, batch_size=self.batch_size, shuffle=True)
-        val_dataset = torch.utils.data.TensorDataset(val_eeg, val_image)
-        self.val_dataloader = torch.utils.data.DataLoader(dataset=val_dataset, batch_size=self.batch_size, shuffle=False)
-
-        test_eeg = torch.from_numpy(test_eeg)
-        test_img_feature = torch.from_numpy(test_img_feature)
-        test_center = torch.from_numpy(test_center)
-        test_label = torch.from_numpy(test_label)
-        test_dataset = torch.utils.data.TensorDataset(test_eeg, test_label)
-        self.test_dataloader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=self.batch_size_test, shuffle=False)
+        train_loader, val_loader, test_loader, all_test_img_feature = get_dataloaders(
+            self.eeg_data_path, 
+            self.img_data_path, 
+            self.nSub, 
+            self.batch_size, 
+            num_workers=0 if args.debug else 4, 
+            debug=args.debug,
+            large_image_features=True if args.image_features_type == 'hidden_states' else False
+        )
 
         # Optimizers
-        self.optimizer = torch.optim.Adam(itertools.chain(self.Enc_eeg.parameters(), self.Proj_eeg.parameters(), self.Proj_img.parameters(), self.Cross_att.parameters()), 
+        self.optimizer = torch.optim.Adam(self.model.parameters(), 
                                           lr=self.lr, 
                                           betas=(self.b1, self.b2))
 
@@ -230,33 +167,18 @@ class IE():
             epoch_losses_eeg = []
             epoch_losses_img = []
 
-            self.Enc_eeg.train()
-            self.Proj_eeg.train()
-            self.Proj_img.train()
-            self.Cross_att.train()
+            self.model.train()
             starttime_epoch = time.time()
 
-            for i, (eeg, img) in enumerate(self.dataloader):
+            for eeg, img in tqdm(train_loader):
 
                 # img = Variable(img.cuda().type(self.Tensor))
-                eeg = eeg.type(self.Tensor).to(device)
-                img_features = img.type(self.Tensor).to(device)
-                labels = torch.arange(eeg.shape[0])  # used for the loss
-                labels = labels.type(self.LongTensor).to(device)
+                eeg = eeg.to(device)
+                img = img.to(device)
+                labels = torch.arange(eeg.shape[0]).to(device)  # used for the loss
 
-                # obtain the features
-                eeg_features = self.Enc_eeg(eeg)
-
-                # project the features to a multimodal embedding space
-                eeg_features = self.Proj_eeg(eeg_features) # shape [batch_size, 768]
-                img_features = self.Proj_img(img_features) # shape [batch_size, 768]
-
-                # apply cross-attention
-                eeg_features, img_features = self.Cross_att(eeg_features, img_features)
-            
-                # normalize the features
-                eeg_features = eeg_features / eeg_features.norm(dim=1, keepdim=True)
-                img_features = img_features / img_features.norm(dim=1, keepdim=True)
+                # Feed through the model
+                eeg_features, img_features = self.model(eeg, img)
 
                 # cosine similarity as the logits
                 logit_scale = self.logit_scale.exp()
@@ -293,32 +215,21 @@ class IE():
             train_results[0, e, 2] = avg_epoch_loss_img
 
             if (e + 1) % 1 == 0:
-                self.Enc_eeg.eval()
-                self.Proj_eeg.eval()
-                self.Proj_img.eval()
-                self.Cross_att.eval()
+                self.model.eval()
 
                 with torch.no_grad():
                     # * validation part
                     val_losses = []
                     val_losses_eeg = []
                     val_losses_img = []
-                    for i, (veeg, vimg) in enumerate(self.val_dataloader):
+                    for veeg, vimg in tqdm(val_loader):
 
-                        veeg = veeg.type(self.Tensor).to(device)
-                        vimg_features = vimg.type(self.Tensor).to(device)
-                        vlabels = torch.arange(veeg.shape[0])
-                        vlabels = vlabels.type(self.LongTensor).to(device)
+                        veeg = veeg.to(device)
+                        vimg = vimg.to(device)
+                        vlabels = torch.arange(veeg.shape[0]).to(device)
 
-                        veeg_features = self.Enc_eeg(veeg)
-                        veeg_features = self.Proj_eeg(veeg_features)
-                        vimg_features = self.Proj_img(vimg_features)
-                        
-                        # Adding cross att
-                        veeg_features, vimg_features = self.Cross_att(veeg_features, vimg_features)
-
-                        veeg_features = veeg_features / veeg_features.norm(dim=1, keepdim=True)
-                        vimg_features = vimg_features / vimg_features.norm(dim=1, keepdim=True)
+                        # Feed through the model
+                        veeg_features, vimg_features = self.model(veeg, vimg)
 
                         logit_scale = self.logit_scale.exp()
                         vlogits_per_eeg = logit_scale * veeg_features @ vimg_features.t()
@@ -350,10 +261,7 @@ class IE():
                         os.makedirs(model_checkpoint_path, exist_ok=True)
                         print(f"New best epoch - {best_epoch}")
                         # Save models, handling both DataParallel and non-DataParallel cases
-                        save_model(self.Enc_eeg, model_checkpoint_path, run_name)
-                        save_model(self.Cross_att, model_checkpoint_path, run_name)
-                        save_model(self.Proj_eeg, model_checkpoint_path, run_name)
-                        save_model(self.Proj_img, model_checkpoint_path, run_name)
+                        save_model(self.model, model_checkpoint_path, run_name)
 
                 print('Epoch:', e + 1,
                       '  Cos eeg: %.4f' % loss_eeg.detach().cpu().numpy(),
@@ -365,34 +273,23 @@ class IE():
             print(f"Epoch {e + 1} took {endtime_epoch - starttime_epoch} seconds")
 
         # * test part
-        all_center = test_center
         total = 0
         top1 = 0
         top3 = 0
         top5 = 0
 
-        self.Enc_eeg = load_model(self.Enc_eeg, model_checkpoint_path, run_name)
-        self.Cross_att = load_model(self.Cross_att, model_checkpoint_path, run_name)
-        self.Proj_eeg = load_model(self.Proj_eeg, model_checkpoint_path, run_name)
-        self.Proj_img = load_model(self.Proj_img, model_checkpoint_path, run_name)
-
-        self.Enc_eeg.eval()
-        self.Cross_att.eval()
-        self.Proj_eeg.eval()
-        self.Proj_img.eval()
+        self.model = load_model(self.model, model_checkpoint_path, run_name)
+        self.model.eval()
 
         with torch.no_grad():
-            for i, (teeg, tlabel) in enumerate(self.test_dataloader):
-                teeg = teeg.type(self.Tensor).to(device)
-                tlabel = tlabel.type(self.LongTensor).to(device)
+            for teeg, tlabel in tqdm(test_loader):
+                teeg = teeg.to(device)
+                tlabel = tlabel.to(device)
+                timg = all_test_img_feature.to(device)
 
-                timg = test_img_feature.type(self.Tensor).to(device)
+                # Feed through the model
+                tfea, timg = self.model(teeg, timg)
 
-                timg = self.Proj_img(timg)
-                tfea = self.Proj_eeg(self.Enc_eeg(teeg))
-                tfea, timg = self.Cross_att(tfea, timg)
-
-                tfea = tfea / tfea.norm(dim=1, keepdim=True)
                 similarity = (tfea @ timg.t()).softmax(dim=-1)
                 _, indices = similarity.topk(5)
 
@@ -445,7 +342,7 @@ def main():
         avg_train_results.append(train_results)
                 
 
-    # Compute and log average train results
+    # Compute and log average train/validation results
     avg_train_results = np.mean(avg_train_results, axis=0) # size: (2, epochs, 3)
     for i in range(len(avg_train_results)):
         mode = 'train' if i == 0 else 'val'

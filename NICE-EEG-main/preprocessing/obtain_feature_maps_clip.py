@@ -6,6 +6,7 @@ using huggingface pretrained CLIP model
 """
 
 import argparse
+import shutil
 import torch.nn as nn
 import numpy as np
 import torch
@@ -91,7 +92,6 @@ for p in img_partitions:
 				img_embeds    = model(**vision_inputs).image_embeds.cpu().numpy()        # (B, 768)
 			else:
 				img_embeds    = model(**vision_inputs).vision_model_output.last_hidden_state.cpu().numpy()        # (B, 257, 1024)
-			print("Image embeddings shape: ", img_embeds.shape)
 			# save each image’s features individually
 			for i, image_idx in enumerate(image_idxs):
 				file_name = p + '_' + format(image_idx+1, '07')
@@ -103,20 +103,19 @@ print("Start combining feature maps into the same numpy file...")
 for p in ['training', 'test']:
 	# Load the feature maps
 	feats = []
-	save_dir = os.path.join(base_save_dir, p + '_images')
-	fmaps_list = os.listdir(save_dir)
+	load_dir = os.path.join(base_save_dir, p + '_images')
+	fmaps_list = os.listdir(load_dir)
 	fmaps_list.sort()
 	for f, fmaps in enumerate(fmaps_list):
-		fmaps_data = np.load(os.path.join(save_dir, fmaps))
+		fmaps_data = np.load(os.path.join(load_dir, fmaps))
 		feats.append(fmaps_data)
 
 	# Save all the train/test feature maps into one numpy file
 	file_name = 'clip_feature_maps_' + p
-	np.save(os.path.join(save_dir, file_name), feats)
+	np.save(os.path.join(base_save_dir, file_name), feats)
 	del feats
 
-	# Delete the individual numpy files after combining
-	for fmaps in fmaps_list:
-		os.remove(os.path.join(save_dir, fmaps))
+	# Delete the directory containing the individual numpy files
+	shutil.rmtree(load_dir)
 
 print("Done extracting the feature maps!")
