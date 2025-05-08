@@ -6,8 +6,6 @@ command:                     # anything *not* swept stays fixed
   - --dataset_path
   - /scratch-shared/scur0549/datasets/Things-EEG2/
   - --use_attn
-  - --image_features_type
-  - hidden_states
   - --batch_size
   - 512
   - --epoch
