@@ -41,11 +41,6 @@ parser.add_argument('--batch_size', default=1000, type=int,
                          'batch size of all GPUs on the current node when '
                          'using Data Parallel or Distributed Data Parallel')
 parser.add_argument('--dataset_path', default='Things-EEG2/', type=str, help='Path to the dataset. ')
-parser.add_argument('--image_features_type', default='final_embedding', choices=['final_embedding', 'hidden_states'], 
-					help="""
-                    Type of image features to use. 
-					For final_embedding, the image features are the image embeddings from the shared CLIP subspace where the contrastive loss is computed - 1-D (768). 
-					For hidden_states, the image features are all the hidden states of the last layer - 2-D (257, 1024).""")
 # Auxiliary parameters
 parser.add_argument('--seed', default=2023, type=int,
                     help='seed for initializing training. ')
@@ -98,6 +93,10 @@ run.name = run_name
 wandb.define_metric("epoch")
 wandb.define_metric("train/*", step_metric="epoch")
 wandb.define_metric("val/*", step_metric="epoch")
+
+# Pre-run setup
+args.image_features_type = 'hidden_states' if args.use_attn else 'final_embedding'
+
 
 # Image2EEG
 class IE():

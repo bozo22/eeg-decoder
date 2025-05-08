@@ -88,7 +88,7 @@ class Proj_eeg(nn.Sequential):
 
 
 class Proj_img(nn.Sequential):
-    def __init__(self, input_dim=1024, proj_dim=768, drop_proj=0.3):
+    def __init__(self, input_dim=768, proj_dim=768, drop_proj=0.3):
         super().__init__(
             nn.Linear(input_dim, proj_dim),
             ResidualAdd(nn.Sequential(
@@ -185,8 +185,9 @@ class CrossAttention(nn.Module):
             attention_blocks.append(CrossAttentionBlock(emb_dim, num_heads, dropout_p))
         self.attention_blocks = nn.Sequential(*attention_blocks)
     
-    def forward(self, eeg_enc, image_enc):
+    def forward(self, sample):
         
+        eeg_enc, image_enc = sample
         # Expand CLS token to batch size and prepend it to EEG input
         batch_size = eeg_enc.size(0)
         cls_eeg = self.cls_eeg.expand(batch_size, -1, -1)   # (B, 1, emb_dim)
