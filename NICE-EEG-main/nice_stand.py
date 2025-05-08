@@ -58,6 +58,8 @@ parser.add_argument('--att_blocks', default=2, type=int, help='Number of attenti
 parser.add_argument('--att_dropout', default=0.3, type=float, help='Dropout rate for the attention.')
 parser.add_argument('--proj_dim', default=768, type=int, help='Dimension of the projected features + attention embeddings.')
 
+# Debug higher scores
+parser.add_argument('--debug_higher_scores', default=None, choices=['old_image_projector', 'old_final_embeddings', 'both'], help='If True, will run in debug mode with higher scores.')
 args = parser.parse_args()
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() and args.device == 'gpu' else 'cpu')
@@ -97,6 +99,9 @@ wandb.define_metric("val/*", step_metric="epoch")
 # Pre-run setup
 args.image_features_type = 'hidden_states' if args.use_attn else 'final_embedding'
 
+# ======== DEBUG ========
+if args.debug_higher_scores is not None:
+    print(f"!!! Using debug higher scores: {args.debug_higher_scores} !!!")
 
 # Image2EEG
 class IE():
@@ -117,7 +122,10 @@ class IE():
 
         self.start_epoch = 0
         self.eeg_data_path = os.path.join(args.dataset_path, 'Preprocessed_data_250Hz')
-        self.img_data_path = os.path.join(args.dataset_path, 'image_features', args.image_features_type, args.dnn)
+        if args.debug_higher_scores == 'old_final_embeddings' or args.debug_higher_scores == 'both':
+            self.img_data_path = os.path.join(args.dataset_path, 'image_features', args.image_features_type, 'old', args.dnn)
+        else:
+            self.img_data_path = os.path.join(args.dataset_path, 'image_features', args.image_features_type, args.dnn)
 
         os.makedirs(result_path, exist_ok=True)
 

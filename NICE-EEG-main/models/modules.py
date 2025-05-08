@@ -88,7 +88,8 @@ class Proj_eeg(nn.Sequential):
 
 
 class Proj_img(nn.Sequential):
-    def __init__(self, input_dim=768, proj_dim=768, drop_proj=0.3):
+    def __init__(self, input_dim=768, proj_dim=768, drop_proj=0.3, use_old_image_projector=False):
+        self.use_old_image_projector = use_old_image_projector
         super().__init__(
             nn.Linear(input_dim, proj_dim),
             ResidualAdd(nn.Sequential(
@@ -98,6 +99,12 @@ class Proj_img(nn.Sequential):
             )),
             nn.LayerNorm(proj_dim),
         )
+    
+    def forward(self, x):
+        if self.use_old_image_projector:
+            return x
+        else:
+            return super().forward(x)
     
 class CrossAttentionBlock(nn.Module):
     def __init__(self, emb_dim, num_heads, dropout_p):

@@ -7,6 +7,8 @@ class SuperNICE(nn.Module):
     def __init__(self, args):
         super(SuperNICE, self).__init__()
 
+        use_old_image_projector = args.debug_higher_scores == 'old_image_projector' or args.debug_higher_scores == 'both'
+
         # Config for both Img and EEG depending on the image features type extraced by CLIP
         self.img_projector_input_dim = 1024 if args.image_features_type == 'hidden_states' else 768
         self.eeg_encoder_flatten = False if args.image_features_type == 'hidden_states' else True
@@ -24,7 +26,8 @@ class SuperNICE(nn.Module):
         
         self.Enc_eeg = Enc_eeg(flatten=self.eeg_encoder_flatten)
         self.Proj_eeg = Proj_eeg(input_dim = self.eeg_projector_input_dim, proj_dim = self.proj_dim, drop_proj = self.eeg_proj_do)
-        self.Proj_img = Proj_img(input_dim = self.img_projector_input_dim, proj_dim = self.proj_dim, drop_proj = self.img_proj_do)
+        self.Proj_img = Proj_img(input_dim = self.img_projector_input_dim, proj_dim = self.proj_dim, drop_proj = self.img_proj_do, 
+                                 use_old_image_projector = use_old_image_projector)
         if self.use_attention:
             self.Cross_att = CrossAttention(emb_dim=self.proj_dim, num_heads=self.att_heads, 
                                             n_blocks=self.att_blocks, dropout_p=self.att_dropout)
