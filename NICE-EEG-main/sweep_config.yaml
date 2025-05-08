@@ -4,8 +4,12 @@ command:                     # anything *not* swept stays fixed
   - python
   - ${program}
   - --dataset_path
-  - /scratch-shared/scur0549/datasets/Things-EEG2/Preprocessed_data_250Hz/
+  - /scratch-shared/scur0549/datasets/Things-EEG2/
   - --use_attn
+  - --batch_size
+  - 512
+  - --epoch
+  - 100
 
 method: bayes                # or "random", "grid", "asha"
 metric:
@@ -15,7 +19,7 @@ metric:
 parameters:
   lr:
     distribution: log_uniform_values
-    min: 1e-7
+    min: 1e-9
     max: 1e-4
   proj_dim:
     values: [128, 512, 768, 1024]

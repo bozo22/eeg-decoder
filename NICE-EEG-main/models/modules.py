@@ -67,17 +67,17 @@ class FlattenHead(nn.Sequential):
 
 
 class Enc_eeg(nn.Sequential):
-    def __init__(self, emb_size=40, **kwargs):
+    def __init__(self, emb_size=40, flatten=True, **kwargs):
         super().__init__(
             PatchEmbedding(emb_size),
-            FlattenHead()
+            FlattenHead() if flatten else nn.Identity()
         )
 
         
 class Proj_eeg(nn.Sequential):
-    def __init__(self, embedding_dim=1440, proj_dim=768, drop_proj=0.5):
+    def __init__(self, input_dim=1440, proj_dim=768, drop_proj=0.5):
         super().__init__(
-            nn.Linear(embedding_dim, proj_dim),
+            nn.Linear(input_dim, proj_dim),
             ResidualAdd(nn.Sequential(
                 nn.GELU(),
                 nn.Linear(proj_dim, proj_dim),
@@ -88,9 +88,9 @@ class Proj_eeg(nn.Sequential):
 
 
 class Proj_img(nn.Sequential):
-    def __init__(self, embedding_dim=768, proj_dim=768, drop_proj=0.3):
+    def __init__(self, input_dim=768, proj_dim=768, drop_proj=0.3):
         super().__init__(
-            nn.Linear(embedding_dim, proj_dim),
+            nn.Linear(input_dim, proj_dim),
             ResidualAdd(nn.Sequential(
                 nn.GELU(),
                 nn.Linear(proj_dim, proj_dim),
@@ -98,19 +98,14 @@ class Proj_img(nn.Sequential):
             )),
             nn.LayerNorm(proj_dim),
         )
-    def forward(self, x):
-        return x 
     
 class CrossAttentionBlock(nn.Module):
     def __init__(self, emb_dim, num_heads, dropout_p):
         super().__init__()
 
-        self.Attention1 = nn.MultiheadAttention(emb_dim, num_heads, dropout = dropout_p)
-        self.Attention2 = nn.MultiheadAttention(emb_dim, num_heads, dropout = dropout_p)
+        self.Attention1 = nn.MultiheadAttention(emb_dim, num_heads, dropout = dropout_p, batch_first=True)
+        self.Attention2 = nn.MultiheadAttention(emb_dim, num_heads, dropout = dropout_p, batch_first=True)
         self.linear_expansion_dim = 4 * emb_dim
-
-        # Add positional embeddings to EEG features
-        self.pos_embedding = nn.Parameter(torch.randn(1, emb_dim))
         
         self.layer_norm11 = nn.RMSNorm(emb_dim)
         self.layer_norm12 = nn.RMSNorm(emb_dim)
@@ -129,8 +124,6 @@ class CrossAttentionBlock(nn.Module):
             nn.Dropout(dropout_p)
         )
         
-        self.init_weights()
-
     def init_weights(self):
         # Initialize attention weights and possibly bias
         for attn in [self.Attention1, self.Attention2]:
@@ -157,7 +150,9 @@ class CrossAttentionBlock(nn.Module):
                     if layer.bias is not None:
                         nn.init.constant_(layer.bias, 0.)
 
-    def forward(self, eeg_enc, image_enc):
+    def forward(self, sample):
+        eeg_enc, image_enc = sample  # shapes including CLS token: [10, 37, 768](B, Leeg + 1, emb_dim) and [10, 257, 768](B, Limg + 1, emb_dim)
+
         image_enc = self.layer_norm11(image_enc)
         eeg_enc = self.layer_norm12(eeg_enc)
 
@@ -175,24 +170,40 @@ class CrossAttentionBlock(nn.Module):
         return eeg_enc, image_enc
     
 class CrossAttention(nn.Module):
-    def __init__(self, emb_dim, num_heads, dropout_p, n_blocks, use_attention=True):
+    def __init__(self, emb_dim, num_heads, dropout_p, n_blocks):
         super().__init__()
-        
-        self.use_attention = use_attention
-        if self.use_attention:
-            attention_blocks = []
-            for i in range(n_blocks):
-                attention_blocks.append(CrossAttentionBlock(emb_dim, num_heads, dropout_p))
-            self.attention_blocks = nn.Sequential(*attention_blocks)
-        else:
-            self.attention_blocks = nn.Identity()
 
+        # CLS token for EEG features - will be used for contrastive loss
+        self.cls_eeg = nn.Parameter(torch.zeros(1, 1, emb_dim))
+        
+        # Learned positional embeddings for the EEG features
+        self.max_eeg_sequence_length = 37
+        self.pos_embedding = nn.Parameter(torch.randn(1, self.max_eeg_sequence_length, emb_dim))
+
+        attention_blocks = []
+        for i in range(n_blocks):
+            attention_blocks.append(CrossAttentionBlock(emb_dim, num_heads, dropout_p))
+        self.attention_blocks = nn.Sequential(*attention_blocks)
     
-    def forward(self, eeg_enc, image_enc):
+    def forward(self, sample):
+        
+        eeg_enc, image_enc = sample
+        # Expand CLS token to batch size and prepend it to EEG input
+        batch_size = eeg_enc.size(0)
+        cls_eeg = self.cls_eeg.expand(batch_size, -1, -1)   # (B, 1, emb_dim)
+        eeg_enc = torch.cat([cls_eeg, eeg_enc], dim=1)   # (B, eeg_sequence_length + 1, emb_dim)
+
+        # Add positional embeddings to EEG features
+        eeg_enc = eeg_enc + self.pos_embedding
+
         eeg_enc, image_enc = self.attention_blocks((eeg_enc, image_enc))
-        return eeg_enc, image_enc
+        # Return CLS tokens for contrastive loss
+        eeg_enc_cls = eeg_enc[:, 0, :]
+        image_enc_cls = image_enc[:, 0, :]
+        return eeg_enc_cls, image_enc_cls
     
     def init_weights(self):
-        if self.use_attention:
-            for block in self.attention_blocks:
-                block.init_weights()
+        for block in self.attention_blocks:
+            block.init_weights()
+        nn.init.normal_(self.pos_embedding)
+        nn.init.trunc_normal_(self.cls_eeg, std=0.02)
