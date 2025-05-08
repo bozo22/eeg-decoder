@@ -154,7 +154,6 @@ class IE():
             self.img_data_path, 
             self.nSub, 
             self.batch_size, 
-            num_workers=0 if args.debug else 4, 
             debug=args.debug,
             large_image_features=True if args.image_features_type == 'hidden_states' else False
         )

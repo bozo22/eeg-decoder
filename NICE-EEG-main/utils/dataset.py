@@ -60,7 +60,7 @@ def split_train_val(eeg_data, img_data, split_ratio=0.05):
 
     return train_eeg, train_image, val_eeg, val_image
 
-def get_dataloaders(base_eeg_data_path, image_data_path, subject_id, batch_size, num_workers, debug=False, large_image_features=False):
+def get_dataloaders(base_eeg_data_path, image_data_path, subject_id, batch_size, debug=False, large_image_features=False):
     """
     Create and return dataloaders for training, validation, and testing.
     
@@ -69,7 +69,6 @@ def get_dataloaders(base_eeg_data_path, image_data_path, subject_id, batch_size,
         image_data_path (str): Path to the image data
         subject_id (int): Subject ID (1-based)
         batch_size (int): Batch size
-        num_workers (int): Number of workers
         debug (bool): Whether to use only a subset of the data in training for debugging
     
     Returns:
@@ -97,22 +96,19 @@ def get_dataloaders(base_eeg_data_path, image_data_path, subject_id, batch_size,
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers
+        shuffle=True
     )
     
     val_loader = DataLoader(
         dataset=val_dataset,
         batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers
+        shuffle=False
     )
     
     test_loader = DataLoader(
         dataset=test_dataset,
         batch_size=400,  # Fixed test batch size as in original code
-        shuffle=False,
-        num_workers=num_workers
+        shuffle=False
     )
     print("Data loaded successfully")
     return train_loader, val_loader, test_loader, all_test_img_feature
