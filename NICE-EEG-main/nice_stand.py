@@ -86,7 +86,7 @@ for k, v in run.config.items():
     setattr(args, k, v)
 pprint(args)
 # Prepare run name
-run_name = f"lr({args.lr})"
+run_name = f"lr({args.lr})-proj_dim({args.proj_dim})"
 if args.use_attn:
     run_name += f"attn(H-{args.att_heads}, B-{args.att_blocks}, DO-{args.att_dropout})"
 if args.debug:
@@ -102,6 +102,7 @@ args.image_features_type = 'hidden_states' if args.use_attn else 'final_embeddin
 # ======== DEBUG ========
 if args.debug_higher_scores is not None:
     print(f"!!! Using debug higher scores: {args.debug_higher_scores} !!!")
+    run_name += f"-debug_higher_scores({args.debug_higher_scores})"
 
 # Image2EEG
 class IE():
