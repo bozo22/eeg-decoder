@@ -6,52 +6,63 @@ use 250 Hz data
 
 import os
 import argparse
-import random
-import itertools
-import datetime
 import time
 import numpy as np
 import pandas as pd
 from pprint import pprint
+import logging as l
+import wandb
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.nn.init as init
-from torch import Tensor
 
-from torch.autograd import Variable
-from einops.layers.torch import Rearrange
-
-from utils.utils import load_model, save_model, seed_experiments
-
+from functools import partialmethod
+from tqdm import tqdm
+from models.SuperNICE import SuperNICE
+from utils.utils import load_model, save_model, seed_experiments, wandb_login
+from utils.dataset import get_dataloaders
 # gpus = [0]
 # os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
 # os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(map(str, gpus))
 NICE_path = os.path.dirname(os.path.abspath(__file__))
 result_path = os.path.join(NICE_path, 'results')
 model_checkpoint_path = os.path.join(result_path, 'checkpoints')
-model_idx = 'test0'
 
 
 parser = argparse.ArgumentParser(description='Experiment Stimuli Recognition test with CLIP encoder')
+# Architectures
 parser.add_argument('--dnn', default='clip', type=str)
+# Training parameters
 parser.add_argument('--epoch', default='200', type=int)
 parser.add_argument('--num_sub', default=10, type=int,
                     help='number of subjects used in the experiments. ')
-parser.add_argument('-batch_size', '--batch-size', default=1000, type=int,
-                    metavar='N',
-                    help='mini-batch size (default: 256), this is the total '
+parser.add_argument('--batch_size', default=1000, type=int,
+                    help='mini-batch size, this is the total '
                          'batch size of all GPUs on the current node when '
                          'using Data Parallel or Distributed Data Parallel')
+parser.add_argument('--dataset_path', default='Things-EEG2/', type=str, help='Path to the dataset. ')
+# Auxiliary parameters
 parser.add_argument('--seed', default=2023, type=int,
                     help='seed for initializing training. ')
-parser.add_argument('--dataset_path', default='Things-EEG2/Preprocessed_data_250Hz/', type=str, help='Path to the dataset. ')
 parser.add_argument('--device', default='gpu', type=str, choices=['gpu', 'cpu'], help='Device to use for training.')
 parser.add_argument('--mixup', action='store_true', help='Use mixup data augmentation')
 parser.add_argument('--mixup-alpha', type=float, default=0.2, help='Mixup alpha parameter')
 parser.add_argument('--mixup_in_class', action='store_true', help='Use mixup data augmentation within the same class')
+parser.add_argument('--debug', action='store_true', help='If True, will run in debug mode with only a fraction of the dataset.')
+# WandB parameters
+parser.add_argument('--disable_wandb', action='store_true', help='If True, will not use wandb.')
+parser.add_argument('--run_group', default=None, type=str, help='Group name for the WandB run.')
 
+# Experiment parameters
+parser.add_argument('--use_attn', action='store_true', help='If True, will use attention.')
+parser.add_argument('--lr', default=0.0002, type=float, help='Learning rate.')
+parser.add_argument('--att_heads', default=4, type=int, help='Number of attention heads.')
+parser.add_argument('--att_blocks', default=2, type=int, help='Number of attention blocks.')
+parser.add_argument('--att_dropout', default=0.3, type=float, help='Dropout rate for the attention.')
+parser.add_argument('--proj_dim', default=768, type=int, help='Dimension of the projected features + attention embeddings.')
+
+# Debug higher scores
+parser.add_argument('--debug_higher_scores', default=None, choices=['old_image_projector', 'old_final_embeddings', 'both'], help='If True, will run in debug mode with higher scores.')
 args = parser.parse_args()
 
 if args.mixup and args.mixup_in_class:
@@ -62,105 +73,45 @@ pprint(args)
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() and args.device == 'gpu' else 'cpu')
 print(f'Using device: {device}')
+# Set debug logger, if debug is True
+if args.debug:
+    l.basicConfig(level=l.DEBUG, format='%(levelname)s: %(message)s')
+    l.debug(">>> Running in DEBUG mode!")
+tqdm.__init__ = partialmethod(tqdm.__init__, disable=False if args.debug else True)
 
-# Import function
+# Seed experiments
 seed_experiments(args.seed)
 
+# WandB setup
+wandb_login(args.disable_wandb)
+run = wandb.init(
+    entity="EEG_decoder",
+    project="EEG-Decoder",
+    config=vars(args),
+    mode="disabled" if args.disable_wandb else "online",
+    group=args.run_group
+)
+for k, v in run.config.items():
+    setattr(args, k, v)
+pprint(args)
+# Prepare run name
+run_name = f"lr({args.lr})-proj_dim({args.proj_dim})"
+if args.use_attn:
+    run_name += f"attn(H-{args.att_heads}, B-{args.att_blocks}, DO-{args.att_dropout})"
+if args.debug:
+    run_name = "[DEBUG]" + run_name
+run.name = run_name
+wandb.define_metric("epoch")
+wandb.define_metric("train/*", step_metric="epoch")
+wandb.define_metric("val/*", step_metric="epoch")
 
-def weights_init_normal(m):
-    classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
-        init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find('Linear') != -1:
-        init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find('BatchNorm') != -1:
-        init.normal_(m.weight.data, 1.0, 0.02)
-        init.constant_(m.bias.data, 0.0)
+# Pre-run setup
+args.image_features_type = 'hidden_states' if args.use_attn else 'final_embedding'
 
-
-class PatchEmbedding(nn.Module):
-    def __init__(self, emb_size=40):
-        super().__init__()
-        # revised from shallownet
-        self.tsconv = nn.Sequential(
-            nn.Conv2d(1, 40, (1, 25), (1, 1)),
-            nn.AvgPool2d((1, 51), (1, 5)),
-            nn.BatchNorm2d(40),
-            nn.ELU(),
-            nn.Conv2d(40, 40, (63, 1), (1, 1)),
-            nn.BatchNorm2d(40),
-            nn.ELU(),
-            nn.Dropout(0.5),
-        )
-
-        self.projection = nn.Sequential(
-            nn.Conv2d(40, emb_size, (1, 1), stride=(1, 1)),  
-            Rearrange('b e (h) (w) -> b (h w) e'),
-        )
-
-    def forward(self, x: Tensor) -> Tensor:
-        # b, _, _, _ = x.shape
-        x = self.tsconv(x)
-        x = self.projection(x)
-        return x
-
-
-class ResidualAdd(nn.Module):
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
-
-    def forward(self, x, **kwargs):
-        res = x
-        x = self.fn(x, **kwargs)
-        x += res
-        return x
-
-
-class FlattenHead(nn.Sequential):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        x = x.contiguous().view(x.size(0), -1)
-        return x
-
-
-class Enc_eeg(nn.Sequential):
-    def __init__(self, emb_size=40, **kwargs):
-        super().__init__(
-            PatchEmbedding(emb_size),
-            FlattenHead()
-        )
-
-        
-class Proj_eeg(nn.Sequential):
-    def __init__(self, embedding_dim=1440, proj_dim=768, drop_proj=0.5):
-        super().__init__(
-            nn.Linear(embedding_dim, proj_dim),
-            ResidualAdd(nn.Sequential(
-                nn.GELU(),
-                nn.Linear(proj_dim, proj_dim),
-                nn.Dropout(drop_proj),
-            )),
-            nn.LayerNorm(proj_dim),
-        )
-
-
-class Proj_img(nn.Sequential):
-    def __init__(self, embedding_dim=768, proj_dim=768, drop_proj=0.3):
-        super().__init__(
-            nn.Linear(embedding_dim, proj_dim),
-            ResidualAdd(nn.Sequential(
-                nn.GELU(),
-                nn.Linear(proj_dim, proj_dim),
-                nn.Dropout(drop_proj),
-            )),
-            nn.LayerNorm(proj_dim),
-        )
-    def forward(self, x):
-        return x 
-
+# ======== DEBUG ========
+if args.debug_higher_scores is not None:
+    print(f"!!! Using debug higher scores: {args.debug_higher_scores} !!!")
+    run_name += f"-debug_higher_scores({args.debug_higher_scores})"
 
 # Image2EEG
 class IE():
@@ -173,74 +124,37 @@ class IE():
         self.batch_size_img = 500 
         self.n_epochs = args.epoch
         self.val_set_size = 740
+    
 
         self.use_mixup = args.mixup
         self.mixup_alpha = args.mixup_alpha
         self.use_mixup_in_class = args.mixup_in_class
 
-        self.lambda_cen = 0.003
-        self.alpha = 0.5
-
-        self.proj_dim = 256
-
-        self.lr = 0.0002
+        # Optimizer parameters
+        self.lr = args.lr
         self.b1 = 0.5
         self.b2 = 0.999
         self.nSub = nsub
 
         self.start_epoch = 0
-        self.eeg_data_path = args.dataset_path
-        self.img_data_path = os.path.join(NICE_path, 'dnn_feature/')
-        self.test_center_path = os.path.join(NICE_path, 'dnn_feature/')
-        self.pretrain = False
+        self.eeg_data_path = os.path.join(args.dataset_path, 'Preprocessed_data_250Hz')
+        if args.debug_higher_scores == 'old_final_embeddings' or args.debug_higher_scores == 'both':
+            self.img_data_path = os.path.join(args.dataset_path, 'image_features', args.image_features_type, 'old', args.dnn)
+        else:
+            self.img_data_path = os.path.join(args.dataset_path, 'image_features', args.image_features_type, args.dnn)
 
         os.makedirs(result_path, exist_ok=True)
-        self.log_write = open(os.path.join(result_path, f"log_subject{self.nSub}.txt"), "w")
 
-        self.Tensor = torch.FloatTensor
-        self.LongTensor = torch.LongTensor
+        self.model = SuperNICE(args)
+        self.model.to(device)
 
-        self.criterion_l1 = torch.nn.L1Loss().cuda()
-        self.criterion_l2 = torch.nn.MSELoss().cuda()
-        self.criterion_cls = torch.nn.CrossEntropyLoss().cuda()
-        self.Enc_eeg = Enc_eeg().to(device)
-        self.Proj_eeg = Proj_eeg().to(device)
-        self.Proj_img = Proj_img().to(device)
-        # self.Enc_eeg = nn.DataParallel(self.Enc_eeg, device_ids=[i for i in range(len(gpus))])
-        # self.Proj_eeg = nn.DataParallel(self.Proj_eeg, device_ids=[i for i in range(len(gpus))])
-        # self.Proj_img = nn.DataParallel(self.Proj_img, device_ids=[i for i in range(len(gpus))])
+        # self.criterion_l1 = torch.nn.L1Loss().cuda()
+        # self.criterion_l2 = torch.nn.MSELoss().cuda()
+        self.criterion_cls = torch.nn.CrossEntropyLoss().to(device)
 
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
-        self.centers = {}
         print('initial define done.')
 
-
-    def get_eeg_data(self):
-        train_data = []
-        train_label = []
-        test_data = []
-        test_label = np.arange(200)
-
-        train_data = np.load(os.path.join(self.eeg_data_path, 'sub-' + format(self.nSub, '02'), 'preprocessed_eeg_training.npy'), allow_pickle=True)
-        train_data = train_data['preprocessed_eeg_data']
-        train_data = np.mean(train_data, axis=1)
-        train_data = np.expand_dims(train_data, axis=1)
-
-        test_data = np.load(self.eeg_data_path + '/sub-' + format(self.nSub, '02') + '/preprocessed_eeg_test.npy', allow_pickle=True)
-        test_data = test_data['preprocessed_eeg_data']
-        test_data = np.mean(test_data, axis=1)
-        test_data = np.expand_dims(test_data, axis=1)
-
-        return train_data, train_label, test_data, test_label
-
-    def get_image_data(self):
-        train_img_feature = np.load(self.img_data_path + self.args.dnn + '_feature_maps_training.npy', allow_pickle=True)
-        test_img_feature = np.load(self.img_data_path + self.args.dnn + '_feature_maps_test.npy', allow_pickle=True)
-
-        train_img_feature = np.squeeze(train_img_feature)
-        test_img_feature = np.squeeze(test_img_feature)
-
-        return train_img_feature, test_img_feature
         
     def update_lr(self, optimizer, lr):
         for param_group in optimizer.param_groups:
@@ -270,82 +184,38 @@ class IE():
         self.Proj_eeg.apply(weights_init_normal)
         self.Proj_img.apply(weights_init_normal)
 
-        train_eeg, _, test_eeg, test_label = self.get_eeg_data()
-        train_img_feature, _ = self.get_image_data() 
-        test_center = np.load(self.test_center_path + 'center_' + self.args.dnn + '.npy', allow_pickle=True)
-
-        # already ensured only one of the self.use_mixup and self.use_mixup_in_class is True
-        if self.use_mixup_in_class:
-            # mixup in class
-            train_classes = train_eeg.shape[0] // args.num_sub
-
-            mixed_eeg_list = []
-            mixed_img_list = []
-
-            for cls in range(train_classes):
-                start = cls * args.num_sub
-                end   = (cls + 1) * args.num_sub
-
-                eeg_slice = train_eeg[start:end]
-                img_slice = train_img_feature[start:end]
-
-                mixed_eeg, mixed_img_features = self.mixup(eeg_slice, img_slice)    
-
-                mixed_eeg_list.append(mixed_eeg.cpu().numpy())
-                mixed_img_list.append(mixed_img_features.cpu().numpy())
-
-            mixed_eeg_array = np.concatenate(mixed_eeg_list, axis=0)
-            mixed_img_array = np.concatenate(mixed_img_list, axis=0)
-            train_eeg = np.concatenate((train_eeg, mixed_eeg_array), axis=0)
-            train_img_feature = np.concatenate((train_img_feature, mixed_img_array), axis=0)
-
-            print(f"After mixup, train_eeg shape: {train_eeg.shape}, train_img_feature shape: {train_img_feature.shape}")
-
-            self.val_set_size = int(self.val_set_size * 2)
-
-        # shuffle the training data
-        train_shuffle = np.random.permutation(len(train_eeg))
-        train_eeg = train_eeg[train_shuffle]
-        train_img_feature = train_img_feature[train_shuffle]
-
-        val_eeg = torch.from_numpy(train_eeg[:self.val_set_size])
-        val_image = torch.from_numpy(train_img_feature[:self.val_set_size])
-
-        train_eeg = torch.from_numpy(train_eeg[self.val_set_size:])
-        train_image = torch.from_numpy(train_img_feature[self.val_set_size:])
-
-        dataset = torch.utils.data.TensorDataset(train_eeg, train_image)
-        self.dataloader = torch.utils.data.DataLoader(dataset=dataset, batch_size=self.batch_size, shuffle=True)
-        val_dataset = torch.utils.data.TensorDataset(val_eeg, val_image)
-        self.val_dataloader = torch.utils.data.DataLoader(dataset=val_dataset, batch_size=self.batch_size, shuffle=False)
-
-        test_eeg = torch.from_numpy(test_eeg)
-        # test_img_feature = torch.from_numpy(test_img_feature)
-        test_center = torch.from_numpy(test_center)
-        test_label = torch.from_numpy(test_label)
-        test_dataset = torch.utils.data.TensorDataset(test_eeg, test_label)
-        self.test_dataloader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=self.batch_size_test, shuffle=False)
+        train_loader, val_loader, test_loader, all_test_img_feature = get_dataloaders(
+            self.eeg_data_path, 
+            self.img_data_path, 
+            self.nSub, 
+            self.batch_size, 
+            debug=args.debug,
+            large_image_features=True if args.image_features_type == 'hidden_states' else False
+        )
 
         # Optimizers
-        self.optimizer = torch.optim.Adam(itertools.chain(self.Enc_eeg.parameters(), self.Proj_eeg.parameters(), self.Proj_img.parameters()), lr=self.lr, betas=(self.b1, self.b2))
+        self.optimizer = torch.optim.Adam(self.model.parameters(), 
+                                          lr=self.lr, 
+                                          betas=(self.b1, self.b2))
 
         num = 0
         best_loss_val = np.inf
+        train_results = np.zeros((2, self.n_epochs, 3)) # dim1 - for train/val, dim2 - for epoch, dim3 - for loss/loss_eeg/loss_img
 
         for e in range(self.n_epochs):
-            in_epoch = time.time()
+            epoch_losses = []
+            epoch_losses_eeg = []
+            epoch_losses_img = []
 
-            self.Enc_eeg.train()
-            self.Proj_eeg.train()
-            self.Proj_img.train()
+            self.model.train()
+            starttime_epoch = time.time()
 
-            # starttime_epoch = datetime.datetime.now()
-
-            for i, (eeg, img) in enumerate(self.dataloader):
+            for eeg, img in tqdm(train_loader):
 
                 # img = Variable(img.cuda().type(self.Tensor))
-                eeg = eeg.type(self.Tensor).to(device)
-                img_features = img.type(self.Tensor).to(device)
+                eeg = eeg.to(device)
+                img = img.to(device)
+                
 
                 if self.use_mixup:
                     # Apply mixup to both EEG and image features using the same permutation and lambda
@@ -355,34 +225,14 @@ class IE():
                     eeg = torch.concatenate((eeg, mixed_eeg), axis=0)
                     img_features = torch.concatenate((img_features, mixed_img_features), axis=0)
                     
-                labels = torch.arange(eeg.shape[0])  # used for the loss
-                labels = labels.type(self.LongTensor).to(device)
-                
-                if self.use_mixup:
-                    # Apply mixup to both EEG and image features using the same permutation and lambda
-                    # This maintains correspondence between mixed samples
-                    batch_size = eeg.size(0)
-                    index = torch.randperm(batch_size).to(device)
-                    lam = np.random.beta(self.mixup_alpha, self.mixup_alpha)
-                    
-                    # Mix both modalities consistently
-                    mixed_eeg = lam * eeg + (1 - lam) * eeg[index]
-                    mixed_img_features = lam * img_features + (1 - lam) * img_features[index]
-                    
-                    # Process with mixed data
-                    eeg_features = self.Enc_eeg(mixed_eeg)
-                    eeg_features = self.Proj_eeg(eeg_features)
-                    img_features = self.Proj_img(mixed_img_features)
-                
+                labels = torch.arange(eeg.shape[0]).to(device)
+                # obtain the features
+                eeg_features = self.Enc_eeg(eeg)
+                # img_features = self.Enc_img(img).last_hidden_state[:,0,:]
 
-                else:
-                    # obtain the features
-                    eeg_features = self.Enc_eeg(eeg)
-                    # img_features = self.Enc_img(img).last_hidden_state[:,0,:]
-
-                    # project the features to a multimodal embedding space
-                    eeg_features = self.Proj_eeg(eeg_features)
-                    img_features = self.Proj_img(img_features)
+                # project the features to a multimodal embedding space
+                eeg_features = self.Proj_eeg(eeg_features)
+                img_features = self.Proj_img(img_features)
 
                 # normalize the features
                 eeg_features = eeg_features / eeg_features.norm(dim=1, keepdim=True)
@@ -400,31 +250,44 @@ class IE():
 
                 # total loss
                 loss = loss_cos
+                epoch_losses.append(loss.item())
+                epoch_losses_eeg.append(loss_eeg.item())
+                epoch_losses_img.append(loss_img.item())
 
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
 
+            # Log epoch metrics
+            avg_epoch_loss = sum(epoch_losses) / len(epoch_losses)
+            avg_epoch_loss_eeg = sum(epoch_losses_eeg) / len(epoch_losses_eeg)
+            avg_epoch_loss_img = sum(epoch_losses_img) / len(epoch_losses_img)
+            wandb.log({
+                "epoch": e + 1,
+                f"train/loss/subj{self.nSub}": avg_epoch_loss,
+                f"train/loss_eeg/subj{self.nSub}": avg_epoch_loss_eeg,
+                f"train/loss_img/subj{self.nSub}": avg_epoch_loss_img
+            })
+            train_results[0, e, 0] = avg_epoch_loss
+            train_results[0, e, 1] = avg_epoch_loss_eeg
+            train_results[0, e, 2] = avg_epoch_loss_img
 
             if (e + 1) % 1 == 0:
-                self.Enc_eeg.eval()
-                self.Proj_eeg.eval()
-                self.Proj_img.eval()
+                self.model.eval()
+
                 with torch.no_grad():
                     # * validation part
-                    for i, (veeg, vimg) in enumerate(self.val_dataloader):
+                    val_losses = []
+                    val_losses_eeg = []
+                    val_losses_img = []
+                    for veeg, vimg in tqdm(val_loader):
 
-                        veeg = veeg.type(self.Tensor).to(device)
-                        vimg_features = vimg.type(self.Tensor).to(device)
-                        vlabels = torch.arange(veeg.shape[0])
-                        vlabels = vlabels.type(self.LongTensor).to(device)
+                        veeg = veeg.to(device)
+                        vimg = vimg.to(device)
+                        vlabels = torch.arange(veeg.shape[0]).to(device)
 
-                        veeg_features = self.Enc_eeg(veeg)
-                        veeg_features = self.Proj_eeg(veeg_features)
-                        vimg_features = self.Proj_img(vimg_features)
-
-                        veeg_features = veeg_features / veeg_features.norm(dim=1, keepdim=True)
-                        vimg_features = vimg_features / vimg_features.norm(dim=1, keepdim=True)
+                        # Feed through the model
+                        veeg_features, vimg_features = self.model(veeg, vimg)
 
                         logit_scale = self.logit_scale.exp()
                         vlogits_per_eeg = logit_scale * veeg_features @ vimg_features.t()
@@ -434,48 +297,58 @@ class IE():
                         vloss_img = self.criterion_cls(vlogits_per_img, vlabels)
 
                         vloss = (vloss_eeg + vloss_img) / 2
+                        val_losses.append(vloss.item())
+                        val_losses_eeg.append(vloss_eeg.item())
+                        val_losses_img.append(vloss_img.item())
 
-                        if vloss <= best_loss_val:
-                            best_loss_val = vloss
-                            best_epoch = e + 1
-                            os.makedirs(model_checkpoint_path, exist_ok=True)
-                            # Save models, handling both DataParallel and non-DataParallel cases
-                            save_model(self.Enc_eeg, model_checkpoint_path, model_idx)
-                            save_model(self.Proj_eeg, model_checkpoint_path, model_idx)
-                            save_model(self.Proj_img, model_checkpoint_path, model_idx)
+                    avg_val_loss = sum(val_losses) / len(val_losses)
+                    avg_val_loss_eeg = sum(val_losses_eeg) / len(val_losses_eeg)
+                    avg_val_loss_img = sum(val_losses_img) / len(val_losses_img)
+                    wandb.log({
+                        "epoch": e + 1,
+                        f"val/loss/subj{self.nSub}": avg_val_loss,
+                        f"val/loss_eeg/subj{self.nSub}": avg_val_loss_eeg,
+                        f"val/loss_img/subj{self.nSub}": avg_val_loss_img
+                        })
+                    train_results[1, e, 0] = avg_val_loss
+                    train_results[1, e, 1] = avg_val_loss_eeg
+                    train_results[1, e, 2] = avg_val_loss_img
+                    if vloss <= best_loss_val:
+                        best_loss_val = vloss
+                        best_epoch = e + 1
+                        os.makedirs(model_checkpoint_path, exist_ok=True)
+                        print(f"New best epoch - {best_epoch}")
+                        # Save models, handling both DataParallel and non-DataParallel cases
+                        save_model(self.model, model_checkpoint_path, run_name)
 
-                print('Epoch:', e,
+                print('Epoch:', e + 1,
                       '  Cos eeg: %.4f' % loss_eeg.detach().cpu().numpy(),
                       '  Cos img: %.4f' % loss_img.detach().cpu().numpy(),
                       '  loss val: %.4f' % vloss.detach().cpu().numpy(),
                       )
-                self.log_write.write('Epoch %d: Cos eeg: %.4f, Cos img: %.4f, loss val: %.4f\n'%(e, loss_eeg.detach().cpu().numpy(), loss_img.detach().cpu().numpy(), vloss.detach().cpu().numpy()))
-
+            
+            endtime_epoch = time.time()
+            print(f"Epoch {e + 1} took {endtime_epoch - starttime_epoch} seconds")
 
         # * test part
-        all_center = test_center
         total = 0
         top1 = 0
         top3 = 0
         top5 = 0
 
-        self.Enc_eeg = load_model(self.Enc_eeg, model_checkpoint_path, model_idx)
-        self.Proj_eeg = load_model(self.Proj_eeg, model_checkpoint_path, model_idx)
-        self.Proj_img = load_model(self.Proj_img, model_checkpoint_path, model_idx)
-
-        self.Enc_eeg.eval()
-        self.Proj_eeg.eval()
-        self.Proj_img.eval()
+        self.model = load_model(self.model, model_checkpoint_path, run_name)
+        self.model.eval()
 
         with torch.no_grad():
-            for i, (teeg, tlabel) in enumerate(self.test_dataloader):
-                teeg = teeg.type(self.Tensor).to(device)
-                tlabel = tlabel.type(self.LongTensor).to(device)
-                all_center = all_center.type(self.Tensor).to(device)            
+            for teeg, tlabel in tqdm(test_loader):
+                teeg = teeg.to(device)
+                tlabel = tlabel.to(device)
+                timg = all_test_img_feature.to(device)
 
-                tfea = self.Proj_eeg(self.Enc_eeg(teeg))
-                tfea = tfea / tfea.norm(dim=1, keepdim=True)
-                similarity = (100.0 * tfea @ all_center.t()).softmax(dim=-1)  # no use 100?
+                # Feed through the model
+                tfea, timg = self.model(teeg, timg)
+
+                similarity = (tfea @ timg.t()).softmax(dim=-1)
                 _, indices = similarity.topk(5)
 
                 tt_label = tlabel.view(-1, 1)
@@ -488,18 +361,19 @@ class IE():
             top1_acc = float(top1) / float(total)
             top3_acc = float(top3) / float(total)
             top5_acc = float(top5) / float(total)
+
+
+        print(f'>> Subject {self.nSub} - The test Top1-%.6f, Top3-%.6f, Top5-%.6f' % (top1_acc, top3_acc, top5_acc))
+        print(f"The best epoch is: {best_epoch}")
         
-        print('The test Top1-%.6f, Top3-%.6f, Top5-%.6f' % (top1_acc, top3_acc, top5_acc))
-        self.log_write.write('The best epoch is: %d\n' % best_epoch)
-        self.log_write.write('The test Top1-%.6f, Top3-%.6f, Top5-%.6f\n' % (top1_acc, top3_acc, top5_acc))
-        
-        return top1_acc, top3_acc, top5_acc
+        return top1_acc, top3_acc, top5_acc, train_results
         # writer.close()
 
 
 def main():
     num_sub = args.num_sub   
     cal_num = 0
+    avg_train_results = []
     aver = []
     aver3 = []
     aver5 = []
@@ -507,31 +381,57 @@ def main():
     for i in range(num_sub):
 
         cal_num += 1
-        starttime = datetime.datetime.now()
+        starttime = time.time()
         seed_n = np.random.randint(args.seed)
 
         print('Subject %d' % (i+1))
         ie = IE(args, i + 1)
 
-        Acc, Acc3, Acc5 = ie.train()
+        Acc, Acc3, Acc5, train_results = ie.train()
         print('THE BEST ACCURACY IS ' + str(Acc))
 
-
-        endtime = datetime.datetime.now()
-        print('subject %d duration: '%(i+1) + str(endtime - starttime))
+        endtime = time.time()
+        print('subject %d duration: %.2f minutes' % (i+1, (endtime - starttime) / 60))
 
         aver.append(Acc)
         aver3.append(Acc3)
         aver5.append(Acc5)
 
+        avg_train_results.append(train_results)
+                
+
+    # Compute and log average train/validation results
+    avg_train_results = np.mean(avg_train_results, axis=0) # size: (2, epochs, 3)
+    for i in range(len(avg_train_results)):
+        mode = 'train' if i == 0 else 'val'
+        for e in range(len(avg_train_results[i])):
+            epoch = e + 1
+            for k in range(len(avg_train_results[i][e])):
+                metric = 'loss' if k == 0 else 'loss_eeg' if k == 1 else 'loss_img'
+                wandb.log({
+                    "epoch": epoch,
+                    f"{mode}/{metric}": avg_train_results[i][e][k]
+                })
+    # Compute and log test results
     aver.append(np.mean(aver))
     aver3.append(np.mean(aver3))
     aver5.append(np.mean(aver5))
+
+    for i in range(len(aver)):
+        if i == len(aver)-1:
+            subj = 'ave'
+        else:
+            subj = f'Subject {i+1}'
+        wandb.run.summary[f"{subj}/top1"] = aver[i]
+        wandb.run.summary[f"{subj}/top3"] = aver3[i]
+        wandb.run.summary[f"{subj}/top5"] = aver5[i]
 
     column = np.arange(1, cal_num+1).tolist()
     column.append('ave')
     pd_all = pd.DataFrame(columns=column, data=[aver, aver3, aver5])
     pd_all.to_csv(os.path.join(result_path, 'train_results.csv'))
+    
+    run.finish()
 
 if __name__ == "__main__":
     print(time.asctime(time.localtime(time.time())))
