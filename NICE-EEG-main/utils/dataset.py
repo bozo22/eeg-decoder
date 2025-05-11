@@ -60,7 +60,7 @@ def split_train_val(eeg_data, img_data, split_ratio=0.05):
 
     return train_eeg, train_image, val_eeg, val_image
 
-def get_dataloaders(base_eeg_data_path, image_data_path, subject_id, batch_size, debug=False, large_image_features=False):
+def get_dataloaders(base_eeg_data_path, image_data_path, subject_id, batch_size, debug=False, large_image_features=False, mixup_in_class=False, mixup=False, mixup_val_set_size=740):
     """
     Create and return dataloaders for training, validation, and testing.
     
@@ -75,17 +75,52 @@ def get_dataloaders(base_eeg_data_path, image_data_path, subject_id, batch_size,
         tuple: (train_loader, val_loader, test_loader, all_test_img_feature)
     """
     print("Start loading data...")
+
+    
     # Get the data
     eeg_data_path = os.path.join(base_eeg_data_path, 'sub-' + format(subject_id, '02'))
     train_eeg, test_eeg, test_label = get_eeg_data(eeg_data_path, use_debug_eeg=debug)
     train_img_feature, test_img_feature = get_image_data(image_data_path, use_debug_images=debug and large_image_features)
+
+    if mixup_in_class:
+        # mixup in class
+        train_classes = train_eeg.shape[0] // args.num_sub
+
+        mixed_eeg_list = []
+        mixed_img_list = []
+
+        for cls in range(train_classes):
+            start = cls * args.num_sub
+            end   = (cls + 1) * args.num_sub
+
+            eeg_slice = train_eeg[start:end]
+            img_slice = train_img_feature[start:end]
+
+            mixed_eeg, mixed_img_features = self.mixup(eeg_slice, img_slice)    
+
+            mixed_eeg_list.append(mixed_eeg.cpu().numpy())
+            mixed_img_list.append(mixed_img_features.cpu().numpy())
+
+        mixed_eeg_array = np.concatenate(mixed_eeg_list, axis=0)
+        mixed_img_array = np.concatenate(mixed_img_list, axis=0)
+        train_eeg = np.concatenate((train_eeg, mixed_eeg_array), axis=0)
+        train_img_feature = np.concatenate((train_img_feature, mixed_img_array), axis=0)
+
+        print(f"After mixup, train_eeg shape: {train_eeg.shape}, train_img_feature shape: {train_img_feature.shape}")
+        mixup_val_set_size = int(mixup_val_set_size * 2)
 
     # Convert test data to tensors
     test_eeg = torch.from_numpy(test_eeg).type(torch.FloatTensor)
     all_test_img_feature = torch.from_numpy(test_img_feature).type(torch.FloatTensor)
     test_label = torch.from_numpy(test_label).type(torch.LongTensor)
 
-    train_eeg, train_image, val_eeg, val_image = split_train_val(train_eeg, train_img_feature)
+    if mixup_in_class or mixup:
+        train_eeg = torch.from_numpy(train_eeg[mixup_val_set_size:])
+        train_image = torch.from_numpy(train_img_feature[mixup_val_set_size:])
+        val_eeg = torch.from_numpy(train_eeg[:mixup_val_set_size])
+        val_image = torch.from_numpy(train_img_feature[:mixup_val_set_size])        
+    else:
+        train_eeg, train_image, val_eeg, val_image = split_train_val(train_eeg, train_img_feature)
 
     # Create datasets
     train_dataset = torch.utils.data.TensorDataset(train_eeg, train_image)
