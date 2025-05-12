@@ -156,8 +156,8 @@ class IE():
             self.batch_size, 
             debug=args.debug,
             large_image_features=True if args.image_features_type == 'hidden_states' else False,
-            use_old_image_features=args.debug_higher_scores == 'old_final_embeddings' or args.debug_higher_scores == 'all',
-            use_old_test_centers=args.debug_higher_scores == 'old_test_centers' or args.debug_higher_scores == 'all' or args.debug_higher_scores == 'both_proj_centers'
+            use_old_image_features=args.debug_higher_scores in ['old_final_embeddings', 'all'],
+            use_old_test_centers=args.debug_higher_scores in ['old_test_centers', 'both_proj_centers', 'all']
         )
 
         # Optimizers

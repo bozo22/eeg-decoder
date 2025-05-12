@@ -158,21 +158,21 @@ class CrossAttentionBlock(nn.Module):
                         nn.init.constant_(layer.bias, 0.)
 
     def forward(self, sample):
-        eeg_enc, image_enc = sample  # shapes including CLS token: [10, 37, 768](B, Leeg + 1, emb_dim) and [10, 257, 768](B, Limg + 1, emb_dim)
+        x_eeg, x_img = sample  # shapes including CLS token: EEG - [10, 37, 768](B, Leeg + 1, emb_dim) and IMAGE - [10, 257, 768](B, Limg + 1, emb_dim)
 
-        image_enc = self.layer_norm11(image_enc)
-        eeg_enc = self.layer_norm12(eeg_enc)
+        eeg_norm = self.layer_norm12(x_eeg)
+        image_norm = self.layer_norm11(x_img)
 
         # Q from img features, K & V from EEG features
-        image_enc = self.Attention1(image_enc, eeg_enc, eeg_enc)[0] + image_enc
+        image_attn = self.Attention1(image_norm, eeg_norm, eeg_norm)[0] + x_img
         # Q from EEG features, K & V from img features
-        eeg_enc = self.Attention2(eeg_enc, image_enc, image_enc)[0] + eeg_enc
+        eeg_attn = self.Attention2(eeg_norm, image_norm, image_norm)[0] + x_eeg
 
-        image_enc = self.layer_norm21(image_enc)
-        eeg_enc = self.layer_norm12(eeg_enc)
+        image_attn_norm = self.layer_norm21(image_attn)
+        eeg_attn_norm = self.layer_norm12(eeg_attn)
 
-        image_enc = self.mlp1(image_enc) + image_enc
-        eeg_enc = self.mlp2(eeg_enc) + eeg_enc
+        image_enc = self.mlp1(image_attn_norm) + image_attn
+        eeg_enc = self.mlp2(eeg_attn_norm) + eeg_attn
 
         return eeg_enc, image_enc
     
