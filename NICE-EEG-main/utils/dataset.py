@@ -34,8 +34,9 @@ def get_eeg_data(dir_path, use_debug_eeg=False):
 def get_image_data(img_data_path, dnn, use_debug_images=False, use_old_image_features=False, use_old_test_centers=False):
 
     if use_old_image_features:
-        img_data_path = os.path.join(img_data_path, 'old/')
-    image_features_path = os.path.join(img_data_path, dnn)
+        image_features_path = os.path.join(img_data_path, 'old', dnn)
+    else:
+        image_features_path = os.path.join(img_data_path, dnn)
 
     if use_debug_images:
         l.debug("Using image features randomly generated for 100 training images only")
@@ -44,7 +45,8 @@ def get_image_data(img_data_path, dnn, use_debug_images=False, use_old_image_fea
         train_img_feature = np.load(image_features_path + '_feature_maps_training.npy', allow_pickle=True)
     
     if use_old_test_centers:
-        test_centers = np.load(img_data_path + 'center_' + dnn + '.npy', allow_pickle=True)
+        test_centers_path = os.path.join(img_data_path, 'old/')
+        test_centers = np.load(test_centers_path + 'center_' + dnn + '.npy', allow_pickle=True)
     else:
         test_centers = np.load(image_features_path + '_feature_maps_test.npy', allow_pickle=True)
         test_centers = np.squeeze(test_centers)
