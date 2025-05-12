@@ -31,18 +31,29 @@ def get_eeg_data(dir_path, use_debug_eeg=False):
 
     return train_data, test_data, test_label
 
-def get_image_data(img_data_path, use_debug_images=False):
+def get_image_data(img_data_path, dnn, use_debug_images=False, use_old_image_features=False, use_old_test_centers=False):
+
+    if use_old_image_features:
+        print("Using old image features")
+        img_data_path = os.path.join(img_data_path, 'old')
+    image_features_path = os.path.join(img_data_path, dnn)
+
     if use_debug_images:
         l.debug("Using image features randomly generated for 100 training images only")
         train_img_feature = np.random.randn(100, 257, 1024)
     else:
-        train_img_feature = np.load(img_data_path + '_feature_maps_training.npy', allow_pickle=True)
-    test_img_feature = np.load(img_data_path + '_feature_maps_test.npy', allow_pickle=True)
+        train_img_feature = np.load(image_features_path + '_feature_maps_training.npy', allow_pickle=True)
+    
+    if use_old_test_centers:
+        print("Using old test centers")
+        test_centers = np.load(img_data_path + 'center_' + dnn + '.npy', allow_pickle=True)
+    else:
+        test_centers = np.load(image_features_path + '_feature_maps_test.npy', allow_pickle=True)
+        test_centers = np.squeeze(test_centers)
 
     train_img_feature = np.squeeze(train_img_feature)
-    test_img_feature = np.squeeze(test_img_feature)
 
-    return train_img_feature, test_img_feature
+    return train_img_feature, test_centers
 
 def split_train_val(eeg_data, img_data, split_ratio=0.05):
     # Shuffle the data
@@ -60,7 +71,11 @@ def split_train_val(eeg_data, img_data, split_ratio=0.05):
 
     return train_eeg, train_image, val_eeg, val_image
 
-def get_dataloaders(base_eeg_data_path, image_data_path, subject_id, batch_size, debug=False, large_image_features=False):
+def get_dataloaders(base_eeg_data_path, image_data_path, dnn, subject_id, batch_size, 
+                    debug=False, 
+                    large_image_features=False, 
+                    use_old_image_features=False, 
+                    use_old_test_centers=False):
     """
     Create and return dataloaders for training, validation, and testing.
     
@@ -70,19 +85,24 @@ def get_dataloaders(base_eeg_data_path, image_data_path, subject_id, batch_size,
         subject_id (int): Subject ID (1-based)
         batch_size (int): Batch size
         debug (bool): Whether to use only a subset of the data in training for debugging
-    
+        large_image_features (bool): Whether the image features are large (hidden states)
+        use_old_image_features (bool): Whether to use old image features, those already present
+        use_old_test_centers (bool): Whether to use old test centers, those already present
     Returns:
-        tuple: (train_loader, val_loader, test_loader, all_test_img_feature)
+        tuple: (train_loader, val_loader, test_loader, test_centers)
     """
     print("Start loading data...")
     # Get the data
     eeg_data_path = os.path.join(base_eeg_data_path, 'sub-' + format(subject_id, '02'))
     train_eeg, test_eeg, test_label = get_eeg_data(eeg_data_path, use_debug_eeg=debug)
-    train_img_feature, test_img_feature = get_image_data(image_data_path, use_debug_images=debug and large_image_features)
+    train_img_feature, test_centers = get_image_data(image_data_path, dnn, 
+                                                         use_debug_images=debug and large_image_features, 
+                                                         use_old_image_features=use_old_image_features,
+                                                         use_old_test_centers=use_old_test_centers)
 
     # Convert test data to tensors
     test_eeg = torch.from_numpy(test_eeg).type(torch.FloatTensor)
-    all_test_img_feature = torch.from_numpy(test_img_feature).type(torch.FloatTensor)
+    test_centers = torch.from_numpy(test_centers).type(torch.FloatTensor)
     test_label = torch.from_numpy(test_label).type(torch.LongTensor)
 
     train_eeg, train_image, val_eeg, val_image = split_train_val(train_eeg, train_img_feature)
@@ -111,4 +131,4 @@ def get_dataloaders(base_eeg_data_path, image_data_path, subject_id, batch_size,
         shuffle=False
     )
     print("Data loaded successfully")
-    return train_loader, val_loader, test_loader, all_test_img_feature
+    return train_loader, val_loader, test_loader, test_centers

@@ -59,7 +59,8 @@ parser.add_argument('--att_dropout', default=0.3, type=float, help='Dropout rate
 parser.add_argument('--proj_dim', default=768, type=int, help='Dimension of the projected features + attention embeddings.')
 
 # Debug higher scores
-parser.add_argument('--debug_higher_scores', default=None, choices=['old_image_projector', 'old_final_embeddings', 'both'], help='If True, will run in debug mode with higher scores.')
+parser.add_argument('--debug_higher_scores', default=None, choices=['old_image_projector', 'old_final_embeddings', 'old_test_centers' 'all'], 
+                    help='If True, will run in debug mode with higher scores.')
 args = parser.parse_args()
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() and args.device == 'gpu' else 'cpu')
@@ -123,10 +124,7 @@ class IE():
 
         self.start_epoch = 0
         self.eeg_data_path = os.path.join(args.dataset_path, 'Preprocessed_data_250Hz')
-        if args.debug_higher_scores == 'old_final_embeddings' or args.debug_higher_scores == 'both':
-            self.img_data_path = os.path.join(args.dataset_path, 'image_features', args.image_features_type, 'old', args.dnn)
-        else:
-            self.img_data_path = os.path.join(args.dataset_path, 'image_features', args.image_features_type, args.dnn)
+        self.img_data_path = os.path.join(args.dataset_path, 'image_features', args.image_features_type)
 
         os.makedirs(result_path, exist_ok=True)
 
@@ -150,13 +148,16 @@ class IE():
         
         self.model.init_weights()
 
-        train_loader, val_loader, test_loader, all_test_img_feature = get_dataloaders(
+        train_loader, val_loader, test_loader, test_centers = get_dataloaders(
             self.eeg_data_path, 
             self.img_data_path, 
+            self.args.dnn,
             self.nSub, 
             self.batch_size, 
             debug=args.debug,
-            large_image_features=True if args.image_features_type == 'hidden_states' else False
+            large_image_features=True if args.image_features_type == 'hidden_states' else False,
+            use_old_image_features=args.debug_higher_scores == 'old_final_embeddings' or args.debug_higher_scores == 'all',
+            use_old_test_centers=args.debug_higher_scores == 'old_test_centers' or args.debug_higher_scores == 'all'
         )
 
         # Optimizers
@@ -176,6 +177,7 @@ class IE():
             self.model.train()
             starttime_epoch = time.time()
 
+            # ===== Training =====
             for eeg, img in tqdm(train_loader):
 
                 # img = Variable(img.cuda().type(self.Tensor))
@@ -220,6 +222,7 @@ class IE():
             train_results[0, e, 1] = avg_epoch_loss_eeg
             train_results[0, e, 2] = avg_epoch_loss_img
 
+            # ===== Validation =====
             if (e + 1) % 1 == 0:
                 self.model.eval()
 
@@ -278,7 +281,7 @@ class IE():
             endtime_epoch = time.time()
             print(f"Epoch {e + 1} took {endtime_epoch - starttime_epoch} seconds")
 
-        # * test part
+        # ===== Test =====
         total = 0
         top1 = 0
         top3 = 0
@@ -291,7 +294,7 @@ class IE():
             for teeg, tlabel in tqdm(test_loader):
                 teeg = teeg.to(device)
                 tlabel = tlabel.to(device)
-                timg = all_test_img_feature.to(device)
+                timg = test_centers.to(device)
 
                 # Feed through the model
                 tfea, timg = self.model(teeg, timg)

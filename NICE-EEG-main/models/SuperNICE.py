@@ -7,7 +7,7 @@ class SuperNICE(nn.Module):
     def __init__(self, args):
         super(SuperNICE, self).__init__()
 
-        use_old_image_projector = args.debug_higher_scores == 'old_image_projector' or args.debug_higher_scores == 'both'
+        use_old_image_projector = args.debug_higher_scores == 'old_image_projector' or args.debug_higher_scores == 'all'
 
         # Config for both Img and EEG depending on the image features type extraced by CLIP
         self.img_projector_input_dim = 1024 if args.image_features_type == 'hidden_states' else 768
