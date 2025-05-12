@@ -59,7 +59,7 @@ parser.add_argument('--att_dropout', default=0.3, type=float, help='Dropout rate
 parser.add_argument('--proj_dim', default=768, type=int, help='Dimension of the projected features + attention embeddings.')
 
 # Debug higher scores
-parser.add_argument('--debug_higher_scores', default=None, choices=['old_image_projector', 'old_final_embeddings', 'old_test_centers' 'all'], 
+parser.add_argument('--debug_higher_scores', default=None, choices=['old_image_projector', 'old_final_embeddings', 'old_test_centers', 'all'], 
                     help='If True, will run in debug mode with higher scores.')
 args = parser.parse_args()
 # Set device
