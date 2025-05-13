@@ -19,7 +19,7 @@ import torch.nn as nn
 from functools import partialmethod
 from tqdm import tqdm
 from models.SuperNICE import SuperNICE
-from utils.utils import load_model, log_artifact, save_model, seed_experiments, wandb_login
+from utils.utils import load_model, save_checkpoint_wandb, save_model, seed_experiments, wandb_login
 from utils.dataset import get_dataloaders
 # gpus = [0]
 # os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
@@ -281,7 +281,7 @@ class IE():
         top5 = 0
 
         self.model, save_path = load_model(self.model, model_checkpoint_path, run_name, self.nSub)
-        log_artifact(save_path, self.nSub, best_loss_val)
+        save_checkpoint_wandb(save_path, self.nSub, best_loss_val)
         self.model.eval()
 
         with torch.no_grad():

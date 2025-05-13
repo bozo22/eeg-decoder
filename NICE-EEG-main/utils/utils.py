@@ -31,7 +31,7 @@ def load_model(model, chekpoint_path, run_name, subject_id, device=None):
     return model, save_path
 
 
-def log_artifact(chekpoint_path, subject_id, best_loss_val):
+def save_checkpoint_wandb(chekpoint_path, subject_id, best_loss_val):
     # create an Artifact object
     artifact = wandb.Artifact(
         name=f"BestModel_sub{subject_id}",          # base name in the Artifacts tab
