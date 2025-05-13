@@ -15,21 +15,38 @@ def seed_experiments(seed):
     torch.backends.cudnn.benchmark = False
 
 
-def save_model(model, chekpoint_path, run_name):
-    model_name = model.module.__class__.__name__ if isinstance(model, nn.DataParallel) else model.__class__.__name__
+def save_model(model, chekpoint_path, run_name, subject_id):
+    model_name = model.__class__.__name__ if not isinstance(model, nn.DataParallel) else model.module.__class__.__name__
     model_state_dict = model.state_dict() if not isinstance(model, nn.DataParallel) else model.module.state_dict()
-    save_path = os.path.join(chekpoint_path, f"{model_name}-{run_name}.pth")
+    save_path = os.path.join(chekpoint_path, f"{model_name}-{run_name}-sub{subject_id}.pth")
     torch.save(model_state_dict, save_path)
     print(f"Model {model_name} saved to {save_path}")
 
-def load_model(model, chekpoint_path, model_idx, device=None): 
-    model_name = model.module.__class__.__name__ if isinstance(model, nn.DataParallel) else model.__class__.__name__
-    save_path = os.path.join(chekpoint_path, f"{model_name}-{model_idx}.pth")
+def load_model(model, chekpoint_path, run_name, subject_id, device=None): 
+    model_name = model.__class__.__name__ if not isinstance(model, nn.DataParallel) else model.module.__class__.__name__
+    save_path = os.path.join(chekpoint_path, f"{model_name}-{run_name}-sub{subject_id}.pth")
     model_state_dict = torch.load(save_path, map_location=device)
     model.load_state_dict(model_state_dict)
     print(f"Model {model_name} loaded from {save_path}")
-    return model
+    return model, save_path
 
+
+def log_artifact(chekpoint_path, subject_id, best_loss_val):
+    # create an Artifact object
+    artifact = wandb.Artifact(
+        name=f"BestModel_sub{subject_id}",          # base name in the Artifacts tab
+        type="checkpoint",     # arbitrary tag; “model”, “ckpt”, etc. all work
+        description="Best val-loss checkpoint",
+        metadata={             # anything you’d like to remember
+            "val_loss": float(best_loss_val),
+            "subject_id": subject_id,
+        },
+    )
+    # attach the file(s)
+    artifact.add_file(chekpoint_path)          # path can be relative or absolute
+    # log it to the run
+    wandb.run.log_artifact(artifact, aliases=["best"])   # “best” = human-friendly pointer
+    print(f"Checkpoint saved to wandb")
 
 def wandb_login(disable_wandb: bool):
     if disable_wandb:
