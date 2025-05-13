@@ -67,10 +67,10 @@ class FlattenHead(nn.Sequential):
 
 
 class Enc_eeg(nn.Sequential):
-    def __init__(self, emb_size=40, flatten=True, **kwargs):
+    def __init__(self, emb_size=40, **kwargs):
         super().__init__(
             PatchEmbedding(emb_size),
-            FlattenHead() if flatten else nn.Identity()
+            FlattenHead()
         )
 
         
@@ -88,8 +88,8 @@ class Proj_eeg(nn.Sequential):
 
 
 class Proj_img(nn.Sequential):
-    def __init__(self, input_dim=768, proj_dim=768, drop_proj=0.3, use_old_image_projector=False):
-        self.use_old_image_projector = use_old_image_projector
+    def __init__(self, input_dim=768, proj_dim=768, drop_proj=0.3, use_image_projector=False):
+        self.use_image_projector = use_image_projector
         super().__init__(
             nn.Linear(input_dim, proj_dim),
             ResidualAdd(nn.Sequential(
@@ -101,116 +101,7 @@ class Proj_img(nn.Sequential):
         )
     
     def forward(self, x):
-        if self.use_old_image_projector:
-            return x
-        else:
+        if self.use_image_projector:
             return super().forward(x)
-    
-class CrossAttentionBlock(nn.Module):
-    def __init__(self, emb_dim, num_heads, dropout_p):
-        super().__init__()
-
-        self.Attention1 = nn.MultiheadAttention(emb_dim, num_heads, dropout = dropout_p, batch_first=True)
-        self.Attention2 = nn.MultiheadAttention(emb_dim, num_heads, dropout = dropout_p, batch_first=True)
-        self.linear_expansion_dim = 4 * emb_dim
-        
-        self.layer_norm11 = nn.RMSNorm(emb_dim)
-        self.layer_norm12 = nn.RMSNorm(emb_dim)
-        self.layer_norm21 = nn.RMSNorm(emb_dim)
-        self.layer_norm22 = nn.RMSNorm(emb_dim)
-        self.mlp1 = nn.Sequential(
-            nn.Linear(emb_dim, self.linear_expansion_dim),
-            nn.GELU(),
-            nn.Linear(self.linear_expansion_dim, emb_dim),
-            nn.Dropout(dropout_p)
-        )
-        self.mlp2 = nn.Sequential(
-            nn.Linear(emb_dim, self.linear_expansion_dim),
-            nn.GELU(),
-            nn.Linear(self.linear_expansion_dim, emb_dim),
-            nn.Dropout(dropout_p)
-        )
-        
-    def init_weights(self):
-        # Initialize attention weights and possibly bias
-        for attn in [self.Attention1, self.Attention2]:
-            # Initialize the projection matrices with Xavier uniform
-            nn.init.xavier_uniform_(attn.in_proj_weight)
-            nn.init.xavier_uniform_(attn.out_proj.weight)
-            
-            # Initialize biases to zero
-            if attn.in_proj_bias is not None:
-                nn.init.constant_(attn.in_proj_bias, 0.)
-            if attn.out_proj.bias is not None:
-                nn.init.constant_(attn.out_proj.bias, 0.)
-        # Initialize linear layers
-        for mlp in [self.mlp1, self.mlp2]:
-            for i, layer in enumerate(mlp):
-                if isinstance(layer, nn.Linear):
-                    # First layer (expansion): standard Xavier initialization
-                    if i == 0:
-                        nn.init.xavier_uniform_(layer.weight)
-                    # Second layer (projection): scaled for residual connection
-                    else:
-                        nn.init.xavier_uniform_(layer.weight, gain=1/math.sqrt(2))
-                    
-                    if layer.bias is not None:
-                        nn.init.constant_(layer.bias, 0.)
-
-    def forward(self, sample):
-        x_eeg, x_img = sample  # shapes including CLS token: EEG - [10, 37, 768](B, Leeg + 1, emb_dim) and IMAGE - [10, 257, 768](B, Limg + 1, emb_dim)
-
-        eeg_norm = self.layer_norm12(x_eeg)
-        image_norm = self.layer_norm11(x_img)
-
-        # Q from img features, K & V from EEG features
-        image_attn = self.Attention1(image_norm, eeg_norm, eeg_norm)[0] + x_img
-        # Q from EEG features, K & V from img features
-        eeg_attn = self.Attention2(eeg_norm, image_norm, image_norm)[0] + x_eeg
-
-        image_attn_norm = self.layer_norm21(image_attn)
-        eeg_attn_norm = self.layer_norm12(eeg_attn)
-
-        image_enc = self.mlp1(image_attn_norm) + image_attn
-        eeg_enc = self.mlp2(eeg_attn_norm) + eeg_attn
-
-        return eeg_enc, image_enc
-    
-class CrossAttention(nn.Module):
-    def __init__(self, emb_dim, num_heads, dropout_p, n_blocks):
-        super().__init__()
-
-        # CLS token for EEG features - will be used for contrastive loss
-        self.cls_eeg = nn.Parameter(torch.zeros(1, 1, emb_dim))
-        
-        # Learned positional embeddings for the EEG features
-        self.max_eeg_sequence_length = 37
-        self.pos_embedding = nn.Parameter(torch.randn(1, self.max_eeg_sequence_length, emb_dim))
-
-        attention_blocks = []
-        for i in range(n_blocks):
-            attention_blocks.append(CrossAttentionBlock(emb_dim, num_heads, dropout_p))
-        self.attention_blocks = nn.Sequential(*attention_blocks)
-    
-    def forward(self, sample):
-        
-        eeg_enc, image_enc = sample
-        # Expand CLS token to batch size and prepend it to EEG input
-        batch_size = eeg_enc.size(0)
-        cls_eeg = self.cls_eeg.expand(batch_size, -1, -1)   # (B, 1, emb_dim)
-        eeg_enc = torch.cat([cls_eeg, eeg_enc], dim=1)   # (B, eeg_sequence_length + 1, emb_dim)
-
-        # Add positional embeddings to EEG features
-        eeg_enc = eeg_enc + self.pos_embedding
-
-        eeg_enc, image_enc = self.attention_blocks((eeg_enc, image_enc))
-        # Return CLS tokens for contrastive loss
-        eeg_enc_cls = eeg_enc[:, 0, :]
-        image_enc_cls = image_enc[:, 0, :]
-        return eeg_enc_cls, image_enc_cls
-    
-    def init_weights(self):
-        for block in self.attention_blocks:
-            block.init_weights()
-        nn.init.normal_(self.pos_embedding)
-        nn.init.trunc_normal_(self.cls_eeg, std=0.02)
+        else:
+            return x            

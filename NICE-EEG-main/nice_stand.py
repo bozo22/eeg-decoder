@@ -51,16 +51,14 @@ parser.add_argument('--disable_wandb', action='store_true', help='If True, will 
 parser.add_argument('--run_group', default=None, type=str, help='Group name for the WandB run.')
 
 # Experiment parameters
-parser.add_argument('--use_attn', action='store_true', help='If True, will use attention.')
 parser.add_argument('--lr', default=0.0002, type=float, help='Learning rate.')
-parser.add_argument('--att_heads', default=4, type=int, help='Number of attention heads.')
-parser.add_argument('--att_blocks', default=2, type=int, help='Number of attention blocks.')
-parser.add_argument('--att_dropout', default=0.3, type=float, help='Dropout rate for the attention.')
 parser.add_argument('--proj_dim', default=768, type=int, help='Dimension of the projected features + attention embeddings.')
+parser.add_argument('--use_image_projector', action='store_true', help=
+                    '''
+                    If true, will use the image projector, otherwise will skip it.
+                    ''')
 
 # Debug higher scores
-parser.add_argument('--debug_higher_scores', default=None, choices=['old_image_projector', 'old_final_embeddings', 'old_test_centers', 'all', 'both_proj_centers'], 
-                    help='If True, will run in debug mode with higher scores.')
 args = parser.parse_args()
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() and args.device == 'gpu' else 'cpu')
@@ -88,8 +86,6 @@ for k, v in run.config.items():
 pprint(args)
 # Prepare run name
 run_name = f"lr({args.lr})-proj_dim({args.proj_dim})"
-if args.use_attn:
-    run_name += f"attn(H-{args.att_heads}, B-{args.att_blocks}, DO-{args.att_dropout})"
 if args.debug:
     run_name = "[DEBUG]" + run_name
 run.name = run_name
@@ -97,13 +93,13 @@ wandb.define_metric("epoch")
 wandb.define_metric("train/*", step_metric="epoch")
 wandb.define_metric("val/*", step_metric="epoch")
 
-# Pre-run setup
-args.image_features_type = 'hidden_states' if args.use_attn else 'final_embedding'
-
 # ======== DEBUG ========
-if args.debug_higher_scores is not None:
-    print(f"!!! Using debug higher scores: {args.debug_higher_scores} !!!")
-    run_name += f"-debug_higher_scores({args.debug_higher_scores})"
+if args.use_image_projector:
+    print(f">>> Using image projector")
+    run_name += f"-useIP"
+else:
+    print(f">>> Skipping image projector")
+    run_name += f"-skipIP"
 
 # Image2EEG
 class IE():
@@ -124,7 +120,7 @@ class IE():
 
         self.start_epoch = 0
         self.eeg_data_path = os.path.join(args.dataset_path, 'Preprocessed_data_250Hz')
-        self.img_data_path = os.path.join(args.dataset_path, 'image_features', args.image_features_type)
+        self.img_data_path = os.path.join(args.dataset_path, 'image_features', 'final_embedding')
 
         os.makedirs(result_path, exist_ok=True)
 
@@ -154,10 +150,7 @@ class IE():
             self.args.dnn,
             self.nSub, 
             self.batch_size, 
-            debug=args.debug,
-            large_image_features=True if args.image_features_type == 'hidden_states' else False,
-            use_old_image_features=args.debug_higher_scores in ['old_final_embeddings', 'all'],
-            use_old_test_centers=args.debug_higher_scores in ['old_test_centers', 'both_proj_centers', 'all']
+            debug=args.debug
         )
 
         # Optimizers
