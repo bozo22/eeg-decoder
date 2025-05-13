@@ -21,3 +21,4 @@ dependencies:
     - pandas  
     - scikit-learn
     - wandb
+    - torch-geometric

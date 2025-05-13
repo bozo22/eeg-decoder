@@ -7,13 +7,14 @@ import torch.nn.init as init
 from torch import Tensor
 from einops.layers.torch import Rearrange
 
+
 def weights_init_normal(m):
     classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
+    if classname.find("Conv") != -1 and classname.find("GATConv") == -1:
         init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find('Linear') != -1:
+    elif classname.find("Linear") != -1:
         init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find('BatchNorm') != -1:
+    elif classname.find("BatchNorm") != -1:
         init.normal_(m.weight.data, 1.0, 0.02)
         init.constant_(m.bias.data, 0.0)
 
@@ -34,8 +35,8 @@ class PatchEmbedding(nn.Module):
         )
 
         self.projection = nn.Sequential(
-            nn.Conv2d(40, emb_size, (1, 1), stride=(1, 1)),  
-            Rearrange('b e (h) (w) -> b (h w) e'),
+            nn.Conv2d(40, emb_size, (1, 1), stride=(1, 1)),
+            Rearrange("b e (h) (w) -> b (h w) e"),
         )
 
     def forward(self, x: Tensor) -> Tensor:
@@ -66,42 +67,40 @@ class FlattenHead(nn.Sequential):
         return x
 
 
-class Enc_eeg(nn.Sequential):
-    def __init__(self, emb_size=40, **kwargs):
-        super().__init__(
-            PatchEmbedding(emb_size),
-            FlattenHead()
-        )
-
-        
 class Proj_eeg(nn.Sequential):
     def __init__(self, input_dim=1440, proj_dim=768, drop_proj=0.5):
         super().__init__(
             nn.Linear(input_dim, proj_dim),
-            ResidualAdd(nn.Sequential(
-                nn.GELU(),
-                nn.Linear(proj_dim, proj_dim),
-                nn.Dropout(drop_proj),
-            )),
+            ResidualAdd(
+                nn.Sequential(
+                    nn.GELU(),
+                    nn.Linear(proj_dim, proj_dim),
+                    nn.Dropout(drop_proj),
+                )
+            ),
             nn.LayerNorm(proj_dim),
         )
 
 
 class Proj_img(nn.Sequential):
-    def __init__(self, input_dim=768, proj_dim=768, drop_proj=0.3, use_image_projector=False):
+    def __init__(
+        self, input_dim=768, proj_dim=768, drop_proj=0.3, use_image_projector=False
+    ):
         self.use_image_projector = use_image_projector
         super().__init__(
             nn.Linear(input_dim, proj_dim),
-            ResidualAdd(nn.Sequential(
-                nn.GELU(),
-                nn.Linear(proj_dim, proj_dim),
-                nn.Dropout(drop_proj),
-            )),
+            ResidualAdd(
+                nn.Sequential(
+                    nn.GELU(),
+                    nn.Linear(proj_dim, proj_dim),
+                    nn.Dropout(drop_proj),
+                )
+            ),
             nn.LayerNorm(proj_dim),
         )
-    
+
     def forward(self, x):
         if self.use_image_projector:
             return super().forward(x)
         else:
-            return x            
+            return x
