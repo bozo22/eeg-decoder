@@ -3,9 +3,12 @@ channels:
   - defaults
   - pytorch
   - conda-forge
+  # - pyg
 dependencies:
   - python=3.11
   - pip
+  # - gcc==12.1.0
+  # - pytorch-sparse
   - pip:
     - torch
     - torchvision
@@ -20,3 +23,7 @@ dependencies:
     - mne
     - pandas  
     - scikit-learn
+    - torch-geometric
+    # - protobuf==3.20
+    # - torch-scatter
+    # - lightning
