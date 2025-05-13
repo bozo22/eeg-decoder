@@ -22,10 +22,10 @@ def save_model(model, chekpoint_path, run_name):
     torch.save(model_state_dict, save_path)
     print(f"Model {model_name} saved to {save_path}")
 
-def load_model(model, chekpoint_path, model_idx):
+def load_model(model, chekpoint_path, model_idx, device=None): 
     model_name = model.module.__class__.__name__ if isinstance(model, nn.DataParallel) else model.__class__.__name__
     save_path = os.path.join(chekpoint_path, f"{model_name}-{model_idx}.pth")
-    model_state_dict = torch.load(save_path)
+    model_state_dict = torch.load(save_path, map_location=device)
     model.load_state_dict(model_state_dict)
     print(f"Model {model_name} loaded from {save_path}")
     return model

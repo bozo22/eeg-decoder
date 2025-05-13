@@ -132,3 +132,36 @@ def get_dataloaders(base_eeg_data_path, image_data_path, dnn, subject_id, batch_
     )
     print("Data loaded successfully")
     return train_loader, val_loader, test_loader, test_centers
+
+def get_test_dataloader(eeg_data_path, img_data_path, dnn, subject_id):
+    
+    print("Start loading test data...")
+
+    # EEG test data
+    eeg_data_path = os.path.join(eeg_data_path, 'sub-' + format(subject_id, '02'))
+    eeg_test_data = np.load(os.path.join(eeg_data_path, 'preprocessed_eeg_test.npy'), allow_pickle=True)
+    eeg_test_data = eeg_test_data['preprocessed_eeg_data']
+    # Average across repetitions
+    eeg_test_data = np.mean(eeg_test_data, axis=1) # Shape: (total_nr_test_imgs x 1 x channels x 250)
+    eeg_test_data = np.expand_dims(eeg_test_data, axis=1)
+    test_eeg = torch.from_numpy(eeg_test_data).type(torch.FloatTensor)
+
+    # Image test data
+    image_features_path = os.path.join(img_data_path, dnn)
+    test_centers = np.load(image_features_path + '_feature_maps_test.npy', allow_pickle=True)
+    test_centers = np.squeeze(test_centers)
+    test_centers = torch.from_numpy(test_centers).type(torch.FloatTensor)
+
+    test_label = np.arange(200)
+    test_label = torch.from_numpy(test_label).type(torch.LongTensor)
+
+    test_dataset = torch.utils.data.TensorDataset(test_eeg, test_label)
+    test_loader = DataLoader(
+    dataset=test_dataset,
+    batch_size=400,  # Fixed test batch size as in original code
+    shuffle=False
+    )
+    
+    print("Test data loaded successfully")
+
+    return test_loader, test_centers
