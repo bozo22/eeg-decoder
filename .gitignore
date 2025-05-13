@@ -184,3 +184,6 @@ Things-EEG2
 
 # Results
 NICE-EEG-main/results
+wandb/
+wandb.password
+NICE-EEG-main/image_features
