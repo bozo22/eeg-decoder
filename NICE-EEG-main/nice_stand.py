@@ -21,7 +21,7 @@ from functools import partialmethod
 from tqdm import tqdm
 from models.SuperNICE import SuperNICE
 from utils.utils import load_model, save_model, seed_experiments, wandb_login
-from utils.dataset import get_dataloaders
+from utils.dataset import get_dataloaders, mixup
 
 # gpus = [0]
 # os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
@@ -227,22 +227,6 @@ class IE:
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr
 
-    def mixup(self, eeg, img_features):
-        if type(eeg) is not Tensor:
-            eeg = torch.from_numpy(eeg)
-            img_features = torch.from_numpy(img_features)
-            eeg = eeg.type(self.Tensor).to(device)
-            img_features = img_features.type(self.Tensor).to(device)
-
-        batch_size = eeg.shape[0]
-        index = torch.randperm(batch_size).to(device)
-        lam = np.random.beta(self.mixup_alpha, self.mixup_alpha)
-
-        # Mix both modalities consistently
-        mixed_eeg = lam * eeg + (1 - lam) * eeg[index]
-        mixed_img_features = lam * img_features + (1 - lam) * img_features[index]
-
-        return mixed_eeg, mixed_img_features
 
     def train(self):
 
@@ -258,8 +242,10 @@ class IE:
                 True if args.image_features_type == "hidden_states" else False
             ),
             mixup_in_class=self.use_mixup_in_class, 
-            mixup=self.use_mixup, 
+            use_mixup=self.use_mixup, 
             mixup_val_set_size=self.val_set_size,
+            mixup_alpha=self.mixup_alpha,
+            device=device,
         )
 
         # Optimizers
@@ -291,8 +277,12 @@ class IE:
                 if self.use_mixup:
                     # Apply mixup to both EEG and image features using the same permutation and lambda
                     # This maintains correspondence between mixed samples
-                    mixed_eeg, mixed_img = self.mixup(eeg, img_features)
+                    mixed_eeg, mixed_img = mixup(self.mixup_alpha, eeg, img_features, device)
 
+                    # Ensure all tensors are of the same type
+                    mixed_eeg = mixed_eeg.type(torch.FloatTensor).to(device)
+                    mixed_img = mixed_img.type(torch.FloatTensor).to(device)
+                    
                     eeg = torch.concatenate((eeg, mixed_eeg), axis=0)
                     img_features = torch.concatenate((img_features, mixed_img), axis=0)
 
