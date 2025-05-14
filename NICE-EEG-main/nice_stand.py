@@ -257,6 +257,9 @@ class IE:
             large_image_features=(
                 True if args.image_features_type == "hidden_states" else False
             ),
+            mixup_in_class=self.use_mixup_in_class, 
+            mixup=self.use_mixup, 
+            mixup_val_set_size=self.val_set_size,
         )
 
         # Optimizers
