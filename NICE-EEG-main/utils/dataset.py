@@ -115,10 +115,10 @@ def get_dataloaders(base_eeg_data_path, image_data_path, subject_id, batch_size,
     test_label = torch.from_numpy(test_label).type(torch.LongTensor)
 
     if mixup_in_class or mixup:
-        train_eeg = torch.from_numpy(train_eeg[mixup_val_set_size:])
-        train_image = torch.from_numpy(train_img_feature[mixup_val_set_size:])
         val_eeg = torch.from_numpy(train_eeg[:mixup_val_set_size])
-        val_image = torch.from_numpy(train_img_feature[:mixup_val_set_size])        
+        val_image = torch.from_numpy(train_img_feature[:mixup_val_set_size])    
+        train_eeg = torch.from_numpy(train_eeg[mixup_val_set_size:])
+        train_image = torch.from_numpy(train_img_feature[mixup_val_set_size:])       
     else:
         train_eeg, train_image, val_eeg, val_image = split_train_val(train_eeg, train_img_feature)
 

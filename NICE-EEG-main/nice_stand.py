@@ -282,18 +282,19 @@ class IE:
 
                 # img = Variable(img.cuda().type(self.Tensor))
                 eeg = eeg.to(device)
-                img = img.to(device)
+                img_features = img.to(device)
+                
 
                 if self.use_mixup:
                     # Apply mixup to both EEG and image features using the same permutation and lambda
                     # This maintains correspondence between mixed samples
-                    mixed_eeg, mixed_img = self.mixup(eeg, img)
+                    mixed_eeg, mixed_img = self.mixup(eeg, img_features)
 
                     eeg = torch.concatenate((eeg, mixed_eeg), axis=0)
-                    img_features = torch.concatenate((img, mixed_img), axis=0)
+                    img_features = torch.concatenate((img_features, mixed_img), axis=0)
 
                 labels = torch.arange(eeg.shape[0]).to(device)
-                eeg_features, img_features = self.model(eeg, img)
+                eeg_features, img_features = self.model(eeg, img_features)
 
                 # cosine similarity as the logits
                 logit_scale = self.logit_scale.exp()
