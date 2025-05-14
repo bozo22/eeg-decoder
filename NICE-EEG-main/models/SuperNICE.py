@@ -1,6 +1,6 @@
 import torch.nn as nn
 import logging as l
-from models.modules import Proj_eeg, Proj_img
+from models.modules import Proj_eeg, Proj_img, Enc_eeg
 from torch.nn import init
 
 class SuperNICE(nn.Module):

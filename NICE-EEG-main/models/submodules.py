@@ -6,22 +6,10 @@ SA GA
 shallownet, deepnet, eegnet, conformer, tsconv
 """
 
-import os
-import argparse
-import math
-import glob
-import random
-import itertools
-import datetime
-import time
-import numpy as np
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.init as init
 from torch import Tensor
-from torch.autograd import Variable
 from torch_geometric.nn import GATConv
 
 from einops import rearrange
