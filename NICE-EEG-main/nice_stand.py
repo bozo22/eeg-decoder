@@ -90,7 +90,7 @@ parser.add_argument(
     "--proj_dim",
     default=768,
     type=int,
-    help="Dimension of the projected features + attention embeddings.",
+    help="Dimension of the projected features.",
 )
 parser.add_argument(
     "--use_image_projector",
@@ -120,10 +120,10 @@ if args.debug:
     l.debug(">>> Running in DEBUG mode!")
 tqdm.__init__ = partialmethod(tqdm.__init__, disable=False if args.debug else True)
 
-# Seed experiments
+# ===== Seed experiments =====
 seed_experiments(args.seed)
 
-# WandB setup
+# ===== WandB setup =====
 wandb_login(args.disable_wandb)
 run = wandb.init(
     entity="EEG_decoder",
@@ -135,22 +135,24 @@ run = wandb.init(
 for k, v in run.config.items():
     setattr(args, k, v)
 pprint(args)
-# Prepare run name
+
+# ===== Prepare run name =====
 run_name = f"lr({args.lr})-proj_dim({args.proj_dim})"
 if args.debug:
     run_name = "[DEBUG]" + run_name
-run.name = run_name
-wandb.define_metric("epoch")
-wandb.define_metric("train/*", step_metric="epoch")
-wandb.define_metric("val/*", step_metric="epoch")
 
-# ======== DEBUG ========
 if args.use_image_projector:
     print(f">>> Using image projector")
     run_name += f"-useIP"
 else:
     print(f">>> Skipping image projector")
     run_name += f"-skipIP"
+run.name = run_name
+
+# ===== WandB metrics =====
+wandb.define_metric("epoch")
+wandb.define_metric("train/*", step_metric="epoch")
+wandb.define_metric("val/*", step_metric="epoch")
 
 
 # Image2EEG

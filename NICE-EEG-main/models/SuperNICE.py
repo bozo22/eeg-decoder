@@ -1,8 +1,7 @@
 import torch.nn as nn
 import logging as l
-from models.modules import weights_init_normal, Proj_eeg, Proj_img
-from models.eeg_encoder import Enc_eeg
-
+from models.modules import Proj_eeg, Proj_img
+from torch.nn import init
 
 class SuperNICE(nn.Module):
     def __init__(self, args):
@@ -50,3 +49,14 @@ class SuperNICE(nn.Module):
         self.Enc_eeg.apply(weights_init_normal)
         self.Proj_eeg.apply(weights_init_normal)
         self.Proj_img.apply(weights_init_normal)
+
+
+def weights_init_normal(m):
+    classname = m.__class__.__name__
+    if classname.find("Conv") != -1 and classname.find("GATConv") == -1:
+        init.normal_(m.weight.data, 0.0, 0.02)
+    elif classname.find("Linear") != -1:
+        init.normal_(m.weight.data, 0.0, 0.02)
+    elif classname.find("BatchNorm") != -1:
+        init.normal_(m.weight.data, 1.0, 0.02)
+        init.constant_(m.bias.data, 0.0)

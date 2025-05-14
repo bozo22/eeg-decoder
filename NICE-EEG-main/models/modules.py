@@ -6,17 +6,60 @@ import torch.nn.init as init
 
 from torch import Tensor
 from einops.layers.torch import Rearrange
+from models.submodules import ResidualAdd, EEG_GAT, channel_attention, FlattenHead
 
 
-def weights_init_normal(m):
-    classname = m.__class__.__name__
-    if classname.find("Conv") != -1 and classname.find("GATConv") == -1:
-        init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find("Linear") != -1:
-        init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find("BatchNorm") != -1:
-        init.normal_(m.weight.data, 1.0, 0.02)
-        init.constant_(m.bias.data, 0.0)
+# ===== EEG Encoder =====
+class Enc_eeg(nn.Sequential):
+    def __init__(self, emb_size=40, depth=3, n_classes=4, config="GA", **kwargs):
+        super().__init__(
+            SpatialEncoder(config),
+            PatchEmbedding(emb_size),
+            FlattenHead(emb_size, n_classes),
+        )
+
+
+class SpatialEncoder(nn.Module):
+    def __init__(self, config):
+        spatial = None
+        if config == "SA":
+            spatial = ResidualAdd(
+                nn.Sequential(
+                    nn.LayerNorm(250),
+                    channel_attention(),
+                    nn.Dropout(0.3),
+                )
+            )
+        elif config == "GA":
+            spatial = ResidualAdd(
+                nn.Sequential(
+                    EEG_GAT(),
+                    nn.Dropout(0.3),
+                )
+            )
+        elif config == "SAGA":
+            spatial = ResidualAdd(
+                nn.Sequential(
+                    nn.LayerNorm(250),
+                    channel_attention(),
+                    nn.Dropout(0.3),
+                    EEG_GAT(),
+                    nn.Dropout(0.3),
+                )
+            )
+        elif config == "GASA":
+            spatial = ResidualAdd(
+                nn.Sequential(
+                    EEG_GAT(),
+                    nn.Dropout(0.3),
+                    nn.LayerNorm(250),
+                    channel_attention(),
+                    nn.Dropout(0.3),
+                )
+            )
+        else:
+            spatial = nn.Identity()
+        super().__init__(spatial)
 
 
 class PatchEmbedding(nn.Module):
@@ -46,26 +89,7 @@ class PatchEmbedding(nn.Module):
         return x
 
 
-class ResidualAdd(nn.Module):
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
-
-    def forward(self, x, **kwargs):
-        res = x
-        x = self.fn(x, **kwargs)
-        x += res
-        return x
-
-
-class FlattenHead(nn.Sequential):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        x = x.contiguous().view(x.size(0), -1)
-        return x
-
+# ===== Projectors =====
 
 class Proj_eeg(nn.Sequential):
     def __init__(self, input_dim=1440, proj_dim=768, drop_proj=0.5):
