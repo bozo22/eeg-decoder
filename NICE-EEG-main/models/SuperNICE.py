@@ -2,6 +2,7 @@ import torch.nn as nn
 import logging as l
 from models.modules import Proj_eeg, Proj_img, Enc_eeg
 from torch.nn import init
+from torch_geometric.nn import GATConv
 
 class SuperNICE(nn.Module):
     def __init__(self, args):
@@ -9,13 +10,13 @@ class SuperNICE(nn.Module):
 
         # Config for both Img and EEG depending on the image features type extraced by CLIP
         self.img_projector_input_dim = 768
-        self.eeg_projector_input_dim = 1440
+        self.eeg_projector_input_dim = 1440 if args.eeg_patch_encoder == "tsconv" else 1600
         # Standard parameters for both Img and EEG projectors
         self.proj_dim = args.proj_dim
         self.eeg_proj_do = 0.5
         self.img_proj_do = 0.3
 
-        self.Enc_eeg = Enc_eeg(config=args.config)
+        self.Enc_eeg = Enc_eeg(config=args.config, patch_encoder=args.eeg_patch_encoder)
         self.Proj_eeg = Proj_eeg(
             input_dim=self.eeg_projector_input_dim,
             proj_dim=self.proj_dim,
@@ -52,11 +53,12 @@ class SuperNICE(nn.Module):
 
 
 def weights_init_normal(m):
-    classname = m.__class__.__name__
-    if classname.find("Conv") != -1 and classname.find("GATConv") == -1:
-        init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find("Linear") != -1:
-        init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find("BatchNorm") != -1:
-        init.normal_(m.weight.data, 1.0, 0.02)
-        init.constant_(m.bias.data, 0.0)
+    if isinstance(m, (nn.Conv2d, nn.Linear, GATConv)):
+        init.normal_(m.weight, mean=0.0, std=0.02)
+        if m.bias is not None:
+            init.constant_(m.bias, 0.0)
+
+    # Normalisation layers
+    elif isinstance(m, (nn.BatchNorm2d, nn.LayerNorm)):
+        init.normal_(m.weight, mean=1.0, std=0.02)
+        init.constant_(m.bias, 0.0)

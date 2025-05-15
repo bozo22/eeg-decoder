@@ -1,16 +1,17 @@
 import torch.nn as nn
 
+import torch as th
 from torch import Tensor
 from einops.layers.torch import Rearrange
-from models.submodules import ResidualAdd, EEG_GAT, channel_attention, FlattenHead
+from models.submodules import Debugger, MultiScaleTemporalConvBlock, ResidualAdd, EEG_GAT, channel_attention, FlattenHead
 
 
 # ===== EEG Encoder =====
 class Enc_eeg(nn.Sequential):
-    def __init__(self, emb_size=40, depth=3, n_classes=4, config="GA", **kwargs):
+    def __init__(self, emb_size=40, config="GA", patch_encoder="tsconv", **kwargs):
         super().__init__(
             SpatialEncoder(config),
-            PatchEmbedding(emb_size),
+            PatchEmbedding(emb_size, patch_encoder),
             FlattenHead(),
         )
 
@@ -58,22 +59,36 @@ class SpatialEncoder(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         return self.spatial(x)
 
-
 class PatchEmbedding(nn.Module):
-    def __init__(self, emb_size=40):
+    def __init__(self, emb_size=40, type="tsconv"):
         super().__init__()
+        if type == "tsconv":
         # revised from shallownet
-        self.tsconv = nn.Sequential(
-            nn.Conv2d(1, 40, (1, 25), (1, 1)),
-            nn.AvgPool2d((1, 51), (1, 5)),
-            nn.BatchNorm2d(40),
-            nn.ELU(),
-            nn.Conv2d(40, 40, (63, 1), (1, 1)),
-            nn.BatchNorm2d(40),
-            nn.ELU(),
-            nn.Dropout(0.5),
-        )
-
+            self.patch_encoder = nn.Sequential(
+                Debugger("Input"),
+                nn.Conv2d(1, 40, (1, 25), (1, 1)),
+                Debugger("Time Conv2d"),
+                nn.AvgPool2d((1, 51), (1, 5)),
+                Debugger("AvgPool2d"),
+                nn.BatchNorm2d(40),
+                nn.ELU(),
+                nn.Conv2d(40, 40, (63, 1), (1, 1)),
+                Debugger("SpatialConv2d"),
+                nn.BatchNorm2d(40),
+                nn.ELU(),
+                nn.Dropout(0.5),
+            )
+        elif type == "multiscale":
+            self.patch_encoder = nn.Sequential(
+                Debugger("Input"),
+                MultiScaleTemporalConvBlock(in_ch=1, out_ch=40),
+                Debugger("MultiScaleTemporalConvBlock"),
+                nn.Conv2d(40, 40, (63, 1), (1, 1), groups=40),
+                Debugger("SpatialConv2d"),
+                nn.BatchNorm2d(40),
+                nn.ELU(),
+                nn.Dropout(0.5),
+            )
         self.projection = nn.Sequential(
             nn.Conv2d(40, emb_size, (1, 1), stride=(1, 1)),
             Rearrange("b e (h) (w) -> b (h w) e"),
@@ -81,10 +96,9 @@ class PatchEmbedding(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         # b, _, _, _ = x.shape
-        x = self.tsconv(x)
+        x = self.patch_encoder(x)
         x = self.projection(x)
         return x
-
 
 # ===== Projectors =====
 
