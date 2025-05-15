@@ -111,6 +111,7 @@ parser.add_argument(
     default="tsconv",
     type=str,
     choices=["tsconv", "multiscale"],
+    help="Configuration for the EEG patch encoder"
 )
 
 # Debug higher scores

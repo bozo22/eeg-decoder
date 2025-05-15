@@ -80,11 +80,8 @@ class PatchEmbedding(nn.Module):
             )
         elif type == "multiscale":
             self.patch_encoder = nn.Sequential(
-                Debugger("Input"),
                 MultiScaleTemporalConvBlock(in_ch=1, out_ch=40),
-                Debugger("MultiScaleTemporalConvBlock"),
                 nn.Conv2d(40, 40, (63, 1), (1, 1), groups=40),
-                Debugger("SpatialConv2d"),
                 nn.BatchNorm2d(40),
                 nn.ELU(),
                 nn.Dropout(0.5),

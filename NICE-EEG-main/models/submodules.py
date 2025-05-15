@@ -134,6 +134,8 @@ class FlattenHead(nn.Sequential):
         return x
 
 
+# ===== Patch Encoder =====
+
 class MultiScaleTemporalConvBlock(nn.Module):
     """
     Inception-style multi-scale temporal convolution for EEG.
@@ -151,7 +153,7 @@ class MultiScaleTemporalConvBlock(nn.Module):
         out_ch: int,
         kernel_sizes=(3, 11, 25, 25),
         dilation_rates=(1, 1, 1, 2),
-        pool_cfg=dict(kernel_size=(1, 50), stride=(1, 5)),  # set stride>1 to down-sample
+        pool_cfg=dict(kernel_size=(1, 51), stride=(1, 5)),  # set stride>1 to down-sample
         dropout_p: float = 0.0,
     ):
         super().__init__()
@@ -209,7 +211,7 @@ class MultiScaleTemporalConvBlock(nn.Module):
         branch_outs = [b(x) for b in self.branches]     # list of [B, branch_ch, 63, T]
         x_cat = torch.cat(branch_outs, dim=1)           # [B, out_ch, 63, T]
         x_cat = self.mix(x_cat)                         # pointwise fusion
-        # x_cat = self.se(x_cat)                          # feature-level channel attention
+        x_cat = self.se(x_cat)                          # feature-level channel attention
         x_cat = self.pool(x_cat)                        # optional down-sampling
         x_cat = self.dropout(x_cat)
 
