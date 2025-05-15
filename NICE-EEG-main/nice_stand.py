@@ -150,10 +150,11 @@ if args.debug:
 
 if args.use_image_projector:
     print(f">>> Using image projector")
-    run_name += f"-useIP"
+    run_name = f"useIP-" + run_name
 else:
     print(f">>> Skipping image projector")
-    run_name += f"-skipIP"
+    run_name = f"skipIP-" + run_name
+run_name = f"{args.eeg_patch_encoder}-" + run_name
 run.name = run_name
 
 # ===== WandB metrics =====
