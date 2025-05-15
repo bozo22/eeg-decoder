@@ -9,6 +9,28 @@ import logging as l
 from torch.utils.data import DataLoader
 
 
+def calculate_aggregations(data):
+    """
+    Calculate various aggregations for the EEG data.
+    Args:
+        data (numpy.ndarray): EEG data of shape (num_samples, num_channels, num_timepoints)
+    Returns:
+        numpy.ndarray: Aggregated EEG data
+    """
+
+    # replace this code to make it as memory efficient as possible
+    batch, _, channels, timepoints = data.shape
+    aggregations = np.empty((batch, 5, channels, timepoints), dtype=data.dtype)
+    print("Calculating EEG aggregations...")
+    aggregations[:, 0] = np.mean(data, axis=1)
+    aggregations[:, 1] = np.std(data, axis=1)
+    aggregations[:, 2] = np.max(data, axis=1)
+    aggregations[:, 3] = np.min(data, axis=1)
+    aggregations[:, 4] = np.median(data, axis=1)
+
+    return aggregations
+
+
 def get_eeg_data(dir_path, use_debug_eeg=False):
     train_data = []
     test_data = []
@@ -18,11 +40,9 @@ def get_eeg_data(dir_path, use_debug_eeg=False):
         os.path.join(dir_path, "preprocessed_eeg_training.npy"), allow_pickle=True
     )
     train_data = train_data["preprocessed_eeg_data"]
-    # Average across repetitions
-    train_data = np.mean(
-        train_data, axis=1
-    )  # Shape: (total_nr_train_imgs x 1 x channels x 250)
-    train_data = np.expand_dims(train_data, axis=1)
+
+    # Calculate the aggregations
+    train_data = calculate_aggregations(train_data)
 
     if use_debug_eeg:
         l.debug("Using EEG features for 100 training images only")
@@ -32,11 +52,7 @@ def get_eeg_data(dir_path, use_debug_eeg=False):
         os.path.join(dir_path, "preprocessed_eeg_test.npy"), allow_pickle=True
     )
     test_data = test_data["preprocessed_eeg_data"]
-    # Average across repetitions
-    test_data = np.mean(
-        test_data, axis=1
-    )  # Shape: (total_nr_test_imgs x 1 x channels x 250)
-    test_data = np.expand_dims(test_data, axis=1)
+    test_data = calculate_aggregations(test_data)
 
     return train_data, test_data, test_label
 
