@@ -65,15 +65,11 @@ class PatchEmbedding(nn.Module):
         if type == "tsconv":
         # revised from shallownet
             self.patch_encoder = nn.Sequential(
-                Debugger("Input"),
                 nn.Conv2d(1, 40, (1, 25), (1, 1)),
-                Debugger("Time Conv2d"),
                 nn.AvgPool2d((1, 51), (1, 5)),
-                Debugger("AvgPool2d"),
                 nn.BatchNorm2d(40),
                 nn.ELU(),
                 nn.Conv2d(40, 40, (63, 1), (1, 1)),
-                Debugger("SpatialConv2d"),
                 nn.BatchNorm2d(40),
                 nn.ELU(),
                 nn.Dropout(0.5),
