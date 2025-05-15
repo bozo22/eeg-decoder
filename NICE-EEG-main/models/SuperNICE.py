@@ -53,12 +53,13 @@ class SuperNICE(nn.Module):
 
 
 def weights_init_normal(m):
-    if isinstance(m, (nn.Conv2d, nn.Linear, GATConv)):
+    # Conv2d and Linear
+    if isinstance(m, (nn.Conv2d, nn.Linear)):
         init.normal_(m.weight, mean=0.0, std=0.02)
         if m.bias is not None:
             init.constant_(m.bias, 0.0)
 
     # Normalisation layers
-    elif isinstance(m, (nn.BatchNorm2d, nn.LayerNorm)):
+    if isinstance(m, (nn.BatchNorm2d, nn.LayerNorm)):
         init.normal_(m.weight, mean=1.0, std=0.02)
         init.constant_(m.bias, 0.0)
