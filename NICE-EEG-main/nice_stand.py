@@ -157,7 +157,7 @@ wandb.define_metric("val/*", step_metric="epoch")
 
 # Image2EEG
 class IE:
-    def __init__(self, args, nsub):
+    def __init__(self, args, n_ways, nsub):
         super(IE, self).__init__()
         self.args = args
         self.num_class = 200
@@ -165,6 +165,7 @@ class IE:
         self.batch_size_test = 400
         self.batch_size_img = 500
         self.n_epochs = args.epoch
+        self.n_ways = n_ways
 
         # Optimizer parameters
         self.lr = args.lr
@@ -197,7 +198,6 @@ class IE:
     def train(self):
 
         self.model.init_weights()
-        n_ways = [2, 5, 10]
 
         (
             train_loader,
@@ -213,7 +213,7 @@ class IE:
             self.nSub,
             self.batch_size,
             debug=args.debug,
-            n_ways=n_ways,
+            n_ways=self.n_ways,
         )
 
         # Optimizers
@@ -354,8 +354,8 @@ class IE:
         top1 = 0
         top3 = 0
         top5 = 0
-        n_way_totals = [0] * len(n_ways)
-        n_way_top1 = [0] * len(n_ways)
+        n_way_totals = [0] * len(self.n_ways)
+        n_way_top1 = [0] * len(self.n_ways)
 
         self.model, save_path = load_model(
             self.model, model_checkpoint_path, run_name, self.nSub
@@ -413,20 +413,22 @@ class IE:
             % (top1_acc, top3_acc, top5_acc)
         )
         print(f"Subject {self.nSub} - n-way Top1 accuracies:")
-        for i, n_way in enumerate(n_ways):
+        for i, n_way in enumerate(self.n_ways):
             print(f"  {n_way}-way: {n_way_top1_acc[i]:.6f}")
 
-        return top1_acc, top3_acc, top5_acc, train_results
+        return top1_acc, top3_acc, top5_acc, train_results, n_way_top1_acc
         # writer.close()
 
 
 def main():
     num_sub = args.num_sub
+    n_ways = [2, 5, 10]
     cal_num = 0
     avg_train_results = []
     aver = []
     aver3 = []
     aver5 = []
+    avern = []
 
     for i in range(num_sub):
 
@@ -435,9 +437,9 @@ def main():
         seed_n = np.random.randint(args.seed)
 
         print("Subject %d" % (i + 1))
-        ie = IE(args, i + 1)
+        ie = IE(args, n_ways, i + 1)
 
-        Acc, Acc3, Acc5, train_results = ie.train()
+        Acc, Acc3, Acc5, train_results, n_way_top1_acc = ie.train()
         print("THE BEST ACCURACY IS " + str(Acc))
 
         endtime = time.time()
@@ -446,6 +448,7 @@ def main():
         aver.append(Acc)
         aver3.append(Acc3)
         aver5.append(Acc5)
+        avern.append(n_way_top1_acc)
 
         avg_train_results.append(train_results)
 
@@ -464,6 +467,8 @@ def main():
     aver.append(np.mean(aver))
     aver3.append(np.mean(aver3))
     aver5.append(np.mean(aver5))
+    avern_a = np.array(avern)
+    avern.append(np.mean(avern_a, axis=0))
 
     for i in range(len(aver)):
         if i == len(aver) - 1:
@@ -473,6 +478,8 @@ def main():
         wandb.run.summary[f"{subj}/top1"] = aver[i]
         wandb.run.summary[f"{subj}/top3"] = aver3[i]
         wandb.run.summary[f"{subj}/top5"] = aver5[i]
+        for j in range(len(avern[i])):
+            wandb.run.summary[f"{subj}/{n_ways[j]}-way"] = avern[i][j]
 
     column = np.arange(1, cal_num + 1).tolist()
     column.append("ave")
