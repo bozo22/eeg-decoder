@@ -11,15 +11,16 @@ class Enc_eeg(nn.Sequential):
         super().__init__(
             SpatialEncoder(config),
             PatchEmbedding(emb_size),
-            FlattenHead(emb_size, n_classes),
+            FlattenHead(),
         )
 
 
 class SpatialEncoder(nn.Module):
     def __init__(self, config):
-        spatial = None
+        super().__init__()
+        self.spatial = nn.Identity()
         if config == "SA":
-            spatial = ResidualAdd(
+            self.spatial = ResidualAdd(
                 nn.Sequential(
                     nn.LayerNorm(250),
                     channel_attention(),
@@ -27,14 +28,14 @@ class SpatialEncoder(nn.Module):
                 )
             )
         elif config == "GA":
-            spatial = ResidualAdd(
+            self.spatial = ResidualAdd(
                 nn.Sequential(
                     EEG_GAT(),
                     nn.Dropout(0.3),
                 )
             )
         elif config == "SAGA":
-            spatial = ResidualAdd(
+            self.spatial = ResidualAdd(
                 nn.Sequential(
                     nn.LayerNorm(250),
                     channel_attention(),
@@ -44,7 +45,7 @@ class SpatialEncoder(nn.Module):
                 )
             )
         elif config == "GASA":
-            spatial = ResidualAdd(
+            self.spatial = ResidualAdd(
                 nn.Sequential(
                     EEG_GAT(),
                     nn.Dropout(0.3),
@@ -53,9 +54,9 @@ class SpatialEncoder(nn.Module):
                     nn.Dropout(0.3),
                 )
             )
-        else:
-            spatial = nn.Identity()
-        super().__init__(spatial)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.spatial(x)
 
 
 class PatchEmbedding(nn.Module):
@@ -86,6 +87,7 @@ class PatchEmbedding(nn.Module):
 
 
 # ===== Projectors =====
+
 
 class Proj_eeg(nn.Sequential):
     def __init__(self, input_dim=1440, proj_dim=768, drop_proj=0.5):

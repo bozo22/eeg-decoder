@@ -197,14 +197,23 @@ class IE:
     def train(self):
 
         self.model.init_weights()
+        n_ways = [2, 5, 10]
 
-        train_loader, val_loader, test_loader, test_centers = get_dataloaders(
+        (
+            train_loader,
+            val_loader,
+            test_loader,
+            test_centers,
+            test_n_way_loaders,
+            test_n_way_centers,
+        ) = get_dataloaders(
             self.eeg_data_path,
             self.img_data_path,
             self.args.dnn,
             self.nSub,
             self.batch_size,
             debug=args.debug,
+            n_ways=n_ways,
         )
 
         # Optimizers
@@ -345,6 +354,8 @@ class IE:
         top1 = 0
         top3 = 0
         top5 = 0
+        n_way_totals = [0] * len(n_ways)
+        n_way_top1 = [0] * len(n_ways)
 
         self.model, save_path = load_model(
             self.model, model_checkpoint_path, run_name, self.nSub
@@ -374,11 +385,36 @@ class IE:
             top3_acc = float(top3) / float(total)
             top5_acc = float(top5) / float(total)
 
+            for i, (test_n_way_loader, test_n_way_center) in enumerate(
+                zip(test_n_way_loaders, test_n_way_centers)
+            ):
+                for teeg, tlabel in tqdm(test_n_way_loader):
+                    teeg = teeg.to(device)
+                    tlabel = tlabel.to(device)
+                    timg = test_n_way_center.to(device)
+
+                    # Feed through the model
+                    tfea, timg = self.model(teeg, timg)
+
+                    similarity = (tfea @ timg.t()).softmax(dim=-1)
+                    _, indices = similarity.topk(1)
+
+                    tt_label = tlabel.view(-1, 1)
+                    n_way_totals[i] += tlabel.size(0)
+                    n_way_top1[i] += (tt_label == indices[:, :1]).sum().item()
+
+            n_way_top1_acc = [
+                float(n_way_top1[i]) / float(n_way_totals[i])
+                for i in range(len(n_way_top1))
+            ]
+
         print(
             f">> Subject {self.nSub} - The test Top1-%.6f, Top3-%.6f, Top5-%.6f"
             % (top1_acc, top3_acc, top5_acc)
         )
-        print(f"The best epoch is: {best_epoch}")
+        print(f"Subject {self.nSub} - n-way Top1 accuracies:")
+        for i, n_way in enumerate(n_ways):
+            print(f"  {n_way}-way: {n_way_top1_acc[i]:.6f}")
 
         return top1_acc, top3_acc, top5_acc, train_results
         # writer.close()
