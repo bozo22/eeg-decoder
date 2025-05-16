@@ -162,32 +162,7 @@ parser.add_argument(
     type=float,
     help="Dropout probability for EEG patch encoder"
 )
-
-
-# Debug higher scores
 args = parser.parse_args()
-
-# Parse comma-separated arguments into tuples/lists
-args.mstc_kernel_sizes = tuple(map(int, args.mstc_kernel_sizes.split(',')))
-args.mstc_dilation_rates = tuple(map(int, args.mstc_dilation_rates.split(',')))
-assert len(args.mstc_kernel_sizes) == len(args.mstc_dilation_rates), "Kernel sizes and dilation rates must have the same length"
-args.mstc_pool_kernel_size = tuple(map(int, args.mstc_pool_kernel_size.split(',')))
-args.mstc_pool_stride = tuple(map(int, args.mstc_pool_stride.split(',')))
-assert len(args.mstc_pool_kernel_size) == len(args.mstc_pool_stride), "Pool kernel size and stride must have the same length"
-
-# Set device
-device = torch.device(
-    "cuda" if torch.cuda.is_available() and args.device == "gpu" else "cpu"
-)
-print(f"Using device: {device}")
-# Set debug logger, if debug is True
-if args.debug:
-    l.basicConfig(level=l.DEBUG, format="%(levelname)s: %(message)s")
-    l.debug(">>> Running in DEBUG mode!")
-tqdm.__init__ = partialmethod(tqdm.__init__, disable=False if args.debug else True)
-
-# ===== Seed experiments =====
-seed_experiments(args.seed)
 
 # ===== WandB setup =====
 wandb_login(args.disable_wandb)
@@ -201,6 +176,33 @@ run = wandb.init(
 for k, v in run.config.items():
     setattr(args, k, v)
 pprint(args)
+
+# ===== WandB metrics =====
+wandb.define_metric("epoch")
+wandb.define_metric("train/*", step_metric="epoch")
+wandb.define_metric("val/*", step_metric="epoch")
+
+# ===== Set device =====
+device = torch.device(
+    "cuda" if torch.cuda.is_available() and args.device == "gpu" else "cpu"
+)
+print(f"Using device: {device}")
+# ===== Set debug logger, if debug is True =====
+if args.debug:
+    l.basicConfig(level=l.DEBUG, format="%(levelname)s: %(message)s")
+    l.debug(">>> Running in DEBUG mode!")
+tqdm.__init__ = partialmethod(tqdm.__init__, disable=False if args.debug else True)
+
+# ===== Seed experiments =====
+seed_experiments(args.seed)
+
+# ===== Parse comma-separated arguments into tuples/lists =====
+args.mstc_kernel_sizes = tuple(map(int, args.mstc_kernel_sizes.split(',')))
+args.mstc_dilation_rates = tuple(map(int, args.mstc_dilation_rates.split(',')))
+assert len(args.mstc_kernel_sizes) == len(args.mstc_dilation_rates), "Kernel sizes and dilation rates must have the same length"
+args.mstc_pool_kernel_size = tuple(map(int, args.mstc_pool_kernel_size.split(',')))
+args.mstc_pool_stride = tuple(map(int, args.mstc_pool_stride.split(',')))
+assert len(args.mstc_pool_kernel_size) == len(args.mstc_pool_stride), "Pool kernel size and stride must have the same length"
 
 # ===== Prepare run name =====
 run_name = f"lr({args.lr})-proj_dim({args.proj_dim})"
@@ -218,11 +220,6 @@ if args.eeg_patch_encoder == "multiscale":
     run_name = f"mstc-do({args.mstc_dropout_p})-outChn({args.mstc_out_channels})-kSize({args.mstc_kernel_sizes})-dil({args.mstc_dilation_rates})-poolKSize({args.mstc_pool_kernel_size})-poolStride({args.mstc_pool_stride})-peDo({args.pe_dropout_p})-" + run_name
 run.name = run_name
 
-# ===== WandB metrics =====
-wandb.define_metric("epoch")
-wandb.define_metric("train/*", step_metric="epoch")
-wandb.define_metric("val/*", step_metric="epoch")
-
 # ===== Pre-run setup =====
 assert not (args.small_run and args.debug), "Cannot have both `small_run` and `debug` mode enabled"
 dataset_mode = None
@@ -233,6 +230,7 @@ if args.small_run:
 elif args.debug:
     print(">>> Training with debug mode (100 training EEG samples only)")
     dataset_mode = "debug"
+
 # Image2EEG
 class IE:
     def __init__(self, args, n_ways, nsub):
