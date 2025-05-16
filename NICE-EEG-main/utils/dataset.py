@@ -5,9 +5,9 @@ import os
 import numpy as np
 import torch
 import logging as l
+from torch import Tensor
 
-from torch.utils.data import DataLoader
-
+from torch.utils.data import Dataset, DataLoader, Subset
 
 def get_eeg_data(dir_path, use_debug_eeg=False):
     train_data = []
@@ -71,16 +71,37 @@ def split_train_val(eeg_data, img_data, split_ratio=0.05):
 
     return train_eeg, train_image, val_eeg, val_image
 
+def mixup(mixup_alpha, eeg, img_features, device):
+    if type(eeg) is not Tensor:
+        eeg = torch.from_numpy(eeg)
+        img_features = torch.from_numpy(img_features)
+        eeg = eeg.type(torch.FloatTensor).to(device)
+        img_features = img_features.type(torch.FloatTensor).to(device)
+
+    batch_size = eeg.shape[0]
+    index = torch.randperm(batch_size).to(device)
+    lam = np.random.beta(mixup_alpha, mixup_alpha)
+
+    # Mix both modalities consistently
+    mixed_eeg = lam * eeg + (1 - lam) * eeg[index]
+    mixed_img_features = lam * img_features + (1 - lam) * img_features[index]
+
+    return mixed_eeg, mixed_img_features
 
 def get_dataloaders(
-    base_eeg_data_path,
+    base_eeg_data_path, 
     image_data_path,
-    dnn,
-    subject_id,
-    batch_size,
-    debug=False,
+    dnn, 
+    subject_id, 
+    batch_size, 
+    debug=False, 
+    mixup_in_class=False, 
+    use_mixup=False, 
+    mixup_val_set_size=740,
+    mixup_alpha=0.4, 
+    device=None, 
     n_ways=[2, 5, 10],
-):
+    ):
     """
     Create and return dataloaders for training, validation, and testing.
 
@@ -95,6 +116,8 @@ def get_dataloaders(
         tuple: (train_loader, val_loader, test_loader, test_centers, test_n_way_loaders, test_n_way_centers)
     """
     print("Start loading data...")
+
+    NUMBER_OF_SUBJECTS = 10
     # Get the data
     eeg_data_path = os.path.join(base_eeg_data_path, "sub-" + format(subject_id, "02"))
     train_eeg, test_eeg, test_label = get_eeg_data(eeg_data_path, use_debug_eeg=debug)
@@ -121,14 +144,13 @@ def get_dataloaders(
         for n_way in n_ways
     ]
 
-    # Convert test data to tensors
-    test_eeg = torch.from_numpy(test_eeg).type(torch.FloatTensor)
-    test_centers = torch.from_numpy(test_centers).type(torch.FloatTensor)
-    test_label = torch.from_numpy(test_label).type(torch.LongTensor)
-
-    train_eeg, train_image, val_eeg, val_image = split_train_val(
-        train_eeg, train_img_feature
-    )
+    if mixup_in_class or use_mixup:
+        val_eeg = torch.from_numpy(train_eeg[:mixup_val_set_size]).type(torch.FloatTensor)
+        val_image = torch.from_numpy(train_img_feature[:mixup_val_set_size]).type(torch.FloatTensor)    
+        train_eeg = torch.from_numpy(train_eeg[mixup_val_set_size:]).type(torch.FloatTensor)
+        train_image = torch.from_numpy(train_img_feature[mixup_val_set_size:]).type(torch.FloatTensor)       
+    else:
+        train_eeg, train_image, val_eeg, val_image = split_train_val(train_eeg, train_img_feature)
 
     # Create datasets
     train_dataset = torch.utils.data.TensorDataset(train_eeg, train_image)

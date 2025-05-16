@@ -15,6 +15,7 @@ import wandb
 
 import torch
 import torch.nn as nn
+from torch import Tensor
 
 from functools import partialmethod
 from tqdm import tqdm
@@ -26,7 +27,7 @@ from utils.utils import (
     seed_experiments,
     wandb_login,
 )
-from utils.dataset import get_dataloaders
+from utils.dataset import get_dataloaders, mixup
 
 # gpus = [0]
 # os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
@@ -71,6 +72,15 @@ parser.add_argument(
     choices=["gpu", "cpu"],
     help="Device to use for training.",
 )
+parser.add_argument("--mixup", action="store_true", help="Use mixup data augmentation")
+parser.add_argument(
+    "--mixup-alpha", type=float, default=0.2, help="Mixup alpha parameter"
+)
+parser.add_argument(
+    "--mixup_in_class",
+    action="store_true",
+    help="Use mixup data augmentation within the same class",
+)
 parser.add_argument(
     "--debug",
     action="store_true",
@@ -109,6 +119,14 @@ parser.add_argument(
 
 # Debug higher scores
 args = parser.parse_args()
+
+if args.mixup and args.mixup_in_class:
+    raise ValueError(
+        "Cannot use both mixup across classes and mixup within the same class. Please choose one."
+    )
+
+pprint(args)
+
 # Set device
 device = torch.device(
     "cuda" if torch.cuda.is_available() and args.device == "gpu" else "cpu"
@@ -126,7 +144,7 @@ seed_experiments(args.seed)
 # ===== WandB setup =====
 wandb_login(args.disable_wandb)
 run = wandb.init(
-    entity="EEG_decoder",
+    # entity="EEG_decoder",
     project="EEG-Decoder",
     config=vars(args),
     mode="disabled" if args.disable_wandb else "online",
@@ -155,6 +173,7 @@ wandb.define_metric("train/*", step_metric="epoch")
 wandb.define_metric("val/*", step_metric="epoch")
 
 
+
 # Image2EEG
 class IE:
     def __init__(self, args, n_ways, nsub):
@@ -166,6 +185,11 @@ class IE:
         self.batch_size_img = 500
         self.n_epochs = args.epoch
         self.n_ways = n_ways
+        self.val_set_size = 740
+
+        self.use_mixup = args.mixup
+        self.mixup_alpha = args.mixup_alpha
+        self.use_mixup_in_class = args.mixup_in_class
 
         # Optimizer parameters
         self.lr = args.lr
@@ -213,6 +237,12 @@ class IE:
             self.nSub,
             self.batch_size,
             debug=args.debug,
+
+            mixup_in_class=self.use_mixup_in_class, 
+            use_mixup=self.use_mixup, 
+            mixup_val_set_size=self.val_set_size,
+            mixup_alpha=self.mixup_alpha,
+            device=device,
             n_ways=self.n_ways,
         )
 
@@ -240,11 +270,23 @@ class IE:
 
                 # img = Variable(img.cuda().type(self.Tensor))
                 eeg = eeg.to(device)
-                img = img.to(device)
-                labels = torch.arange(eeg.shape[0]).to(device)  # used for the loss
+                img_features = img.to(device)
+                
 
-                # Feed through the model
-                eeg_features, img_features = self.model(eeg, img)
+                if self.use_mixup:
+                    # Apply mixup to both EEG and image features using the same permutation and lambda
+                    # This maintains correspondence between mixed samples
+                    mixed_eeg, mixed_img = mixup(self.mixup_alpha, eeg, img_features, device)
+
+                    # Ensure all tensors are of the same type
+                    mixed_eeg = mixed_eeg.type(torch.FloatTensor).to(device)
+                    mixed_img = mixed_img.type(torch.FloatTensor).to(device)
+                    
+                    eeg = torch.concatenate((eeg, mixed_eeg), axis=0)
+                    img_features = torch.concatenate((img_features, mixed_img), axis=0)
+
+                labels = torch.arange(eeg.shape[0]).to(device)
+                eeg_features, img_features = self.model(eeg, img_features)
 
                 # cosine similarity as the logits
                 logit_scale = self.logit_scale.exp()
