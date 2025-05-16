@@ -214,6 +214,8 @@ else:
     print(f">>> Skipping image projector")
     run_name = f"skipIP-" + run_name
 run_name = f"{args.eeg_patch_encoder}-" + run_name
+if args.eeg_patch_encoder == "multiscale":
+    run_name = f"mstc-do({args.mstc_dropout_p})-outChn({args.mstc_out_channels})-kSize({args.mstc_kernel_sizes})-dil({args.mstc_dilation_rates})-poolKSize({args.mstc_pool_kernel_size})-poolStride({args.mstc_pool_stride})-peDo({args.pe_dropout_p})-" + run_name
 run.name = run_name
 
 # ===== WandB metrics =====
@@ -231,7 +233,6 @@ if args.small_run:
 elif args.debug:
     print(">>> Training with debug mode (100 training EEG samples only)")
     dataset_mode = "debug"
-
 # Image2EEG
 class IE:
     def __init__(self, args, n_ways, nsub):
