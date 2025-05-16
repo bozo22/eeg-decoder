@@ -9,13 +9,25 @@ class SuperNICE(nn.Module):
 
         # Config for both Img and EEG depending on the image features type extraced by CLIP
         self.img_projector_input_dim = 768
-        self.eeg_projector_input_dim = 1440 if args.eeg_patch_encoder == "tsconv" else 1600
+        eeg_encoder_output_width = 36 if args.eeg_patch_encoder == "tsconv" else (250 - args.mstc_pool_kernel_size[1]) // args.mstc_pool_stride[1] + 1
+        self.eeg_projector_input_dim = 40 * eeg_encoder_output_width
         # Standard parameters for both Img and EEG projectors
         self.proj_dim = args.proj_dim
         self.eeg_proj_do = 0.5
         self.img_proj_do = 0.3
 
-        self.Enc_eeg = Enc_eeg(config=args.config, patch_encoder=args.eeg_patch_encoder)
+        # Extract MSTC parameters if using multiscale encoder
+        mstc_kwargs = {}
+        if args.eeg_patch_encoder == "multiscale":
+            mstc_kwargs = {
+                'mstc_out_channels': args.mstc_out_channels,
+                'mstc_kernel_sizes': args.mstc_kernel_sizes,
+                'mstc_dilation_rates': args.mstc_dilation_rates,
+                'mstc_pool_kernel_size': args.mstc_pool_kernel_size,
+                'mstc_pool_stride': args.mstc_pool_stride,
+                'mstc_dropout_p': args.mstc_dropout_p
+            }
+        self.Enc_eeg = Enc_eeg(config=args.config, patch_encoder=args.eeg_patch_encoder, **mstc_kwargs)
         self.Proj_eeg = Proj_eeg(
             input_dim=self.eeg_projector_input_dim,
             proj_dim=self.proj_dim,

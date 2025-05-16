@@ -11,7 +11,7 @@ class Enc_eeg(nn.Sequential):
     def __init__(self, emb_size=40, config="GA", patch_encoder="tsconv", **kwargs):
         super().__init__(
             SpatialEncoder(config),
-            PatchEmbedding(emb_size, patch_encoder),
+            PatchEmbedding(emb_size, patch_encoder, **kwargs),
             FlattenHead(),
         )
 
@@ -60,7 +60,7 @@ class SpatialEncoder(nn.Module):
         return self.spatial(x)
 
 class PatchEmbedding(nn.Module):
-    def __init__(self, emb_size=40, type="tsconv"):
+    def __init__(self, emb_size=40, type="tsconv", **kwargs):
         super().__init__()
         if type == "tsconv":
         # revised from shallownet
@@ -76,11 +76,21 @@ class PatchEmbedding(nn.Module):
             )
         elif type == "multiscale":
             self.patch_encoder = nn.Sequential(
-                MultiScaleTemporalConvBlock(in_ch=1, out_ch=40),
-                nn.Conv2d(40, 40, (63, 1), (1, 1)),
+                MultiScaleTemporalConvBlock(
+                    in_ch=1,
+                    out_ch=kwargs.get('mstc_out_channels', 40),
+                    kernel_sizes=kwargs.get('mstc_kernel_sizes', (3, 11, 25, 25)),
+                    dilation_rates=kwargs.get('mstc_dilation_rates', (1, 1, 1, 2)),
+                    pool_cfg=dict(
+                        kernel_size=kwargs.get('mstc_pool_kernel_size', (1, 51)),
+                        stride=kwargs.get('mstc_pool_stride', (1, 5))
+                    ),
+                    dropout_p=kwargs.get('mstc_dropout_p', 0.1)
+                ),
+                nn.Conv2d(kwargs.get('mstc_out_channels', 40), 40, (63, 1), (1, 1)),
                 nn.BatchNorm2d(40),
                 nn.ELU(),
-                nn.Dropout(0.5),
+                nn.Dropout2d(kwargs.get('pe_dropout_p', 0.2)),
             )
         self.projection = nn.Sequential(
             nn.Conv2d(40, emb_size, (1, 1), stride=(1, 1)),
@@ -88,7 +98,6 @@ class PatchEmbedding(nn.Module):
         )
 
     def forward(self, x: Tensor) -> Tensor:
-        # b, _, _, _ = x.shape
         x = self.patch_encoder(x)
         x = self.projection(x)
         return x

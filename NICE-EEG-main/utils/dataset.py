@@ -9,7 +9,7 @@ import logging as l
 from torch.utils.data import DataLoader
 
 
-def get_eeg_data(dir_path, use_debug_eeg=False):
+def get_eeg_data(dir_path, data_mode=None):
     train_data = []
     test_data = []
     test_label = np.arange(200)
@@ -24,9 +24,12 @@ def get_eeg_data(dir_path, use_debug_eeg=False):
     )  # Shape: (total_nr_train_imgs x 1 x channels x 250)
     train_data = np.expand_dims(train_data, axis=1)
 
-    if use_debug_eeg:
-        l.debug("Using EEG features for 100 training images only")
+    if data_mode == "debug":
+        print(">>> Using EEG features for 100 training images only")
         train_data = train_data[:100]
+    elif data_mode == "small":
+        print(">>> Using EEG features for 25 percent of the training images")
+        train_data = train_data[:int(len(train_data) * 0.25)]
 
     test_data = np.load(
         os.path.join(dir_path, "preprocessed_eeg_test.npy"), allow_pickle=True
@@ -78,8 +81,8 @@ def get_dataloaders(
     dnn,
     subject_id,
     batch_size,
-    debug=False,
     n_ways=[2, 5, 10],
+    dataset_mode=None,
 ):
     """
     Create and return dataloaders for training, validation, and testing.
@@ -89,15 +92,15 @@ def get_dataloaders(
         image_data_path (str): Path to the image data
         subject_id (int): Subject ID (1-based)
         batch_size (int): Batch size
-        debug (bool): Whether to use only a subset of the data in training for debugging
         n_ways (list): List of n-way classification test datasets (in addition to the full 200-way test set)
+        dataset_mode (str): Dataset mode (None, "small", "debug") - how much data to use
     Returns:
         tuple: (train_loader, val_loader, test_loader, test_centers, test_n_way_loaders, test_n_way_centers)
     """
     print("Start loading data...")
     # Get the data
     eeg_data_path = os.path.join(base_eeg_data_path, "sub-" + format(subject_id, "02"))
-    train_eeg, test_eeg, test_label = get_eeg_data(eeg_data_path, use_debug_eeg=debug)
+    train_eeg, test_eeg, test_label = get_eeg_data(eeg_data_path, data_mode=dataset_mode)
     train_img_feature, test_centers = get_image_data(image_data_path, dnn)
     test_n_way_eeg, test_n_way_label = [], []
 

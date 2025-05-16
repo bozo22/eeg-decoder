@@ -74,7 +74,12 @@ parser.add_argument(
 parser.add_argument(
     "--debug",
     action="store_true",
-    help="If True, will run in debug mode with only a fraction of the dataset.",
+    help="If True, will run in debug mode with only a very small fraction of the dataset.",
+)
+parser.add_argument(
+    "--small_run",
+    action="store_true",
+    help="If true, will use the small run (25 percent of the dataset and 10 epochs)",
 )
 # WandB parameters
 parser.add_argument(
@@ -114,8 +119,62 @@ parser.add_argument(
     help="Configuration for the EEG patch encoder"
 )
 
+# MultiScaleTemporalConvBlock parameters
+parser.add_argument(
+    "--mstc_out_channels",
+    default=40,
+    type=int,
+    help="Number of output channels for MultiScaleTemporalConvBlock"
+)
+parser.add_argument(
+    "--mstc_kernel_sizes",
+    default="3,11,25,25",
+    type=str,
+    help="Comma-separated list of kernel sizes for MultiScaleTemporalConvBlock"
+)
+parser.add_argument(
+    "--mstc_dilation_rates",
+    default="1,1,1,2",
+    type=str,
+    help="Comma-separated list of dilation rates for MultiScaleTemporalConvBlock"
+)
+parser.add_argument(
+    "--mstc_pool_kernel_size",
+    default="1,51",
+    type=str,
+    help="Comma-separated tuple of kernel size for pooling in MultiScaleTemporalConvBlock"
+)
+parser.add_argument(
+    "--mstc_pool_stride",
+    default="1,5",
+    type=str,
+    help="Comma-separated tuple of stride for pooling in MultiScaleTemporalConvBlock"
+)
+parser.add_argument(
+    "--mstc_dropout_p",
+    default=0.1,
+    type=float,
+    help="Dropout probability for MultiScaleTemporalConvBlock"
+)
+parser.add_argument(
+    "--pe_dropout_p",
+    default=0.2,
+    type=float,
+    help="Dropout probability for EEG patch encoder"
+)
+
+
 # Debug higher scores
 args = parser.parse_args()
+
+# Parse comma-separated arguments into tuples/lists
+args.mstc_kernel_sizes = tuple(map(int, args.mstc_kernel_sizes.split(',')))
+args.mstc_dilation_rates = tuple(map(int, args.mstc_dilation_rates.split(',')))
+assert len(args.mstc_kernel_sizes) == len(args.mstc_dilation_rates), "Kernel sizes and dilation rates must have the same length"
+args.mstc_pool_kernel_size = tuple(map(int, args.mstc_pool_kernel_size.split(',')))
+args.mstc_pool_stride = tuple(map(int, args.mstc_pool_stride.split(',')))
+assert len(args.mstc_pool_kernel_size) == len(args.mstc_pool_stride), "Pool kernel size and stride must have the same length"
+
 # Set device
 device = torch.device(
     "cuda" if torch.cuda.is_available() and args.device == "gpu" else "cpu"
@@ -162,6 +221,16 @@ wandb.define_metric("epoch")
 wandb.define_metric("train/*", step_metric="epoch")
 wandb.define_metric("val/*", step_metric="epoch")
 
+# ===== Pre-run setup =====
+assert not (args.small_run and args.debug), "Cannot have both `small_run` and `debug` mode enabled"
+dataset_mode = None
+if args.small_run:
+    print(">>> Training with small run (25% of the dataset and 10 epochs)")
+    dataset_mode = "small"
+    args.epoch = 30
+elif args.debug:
+    print(">>> Training with debug mode (100 training EEG samples only)")
+    dataset_mode = "debug"
 
 # Image2EEG
 class IE:
@@ -220,8 +289,8 @@ class IE:
             self.args.dnn,
             self.nSub,
             self.batch_size,
-            debug=args.debug,
             n_ways=self.n_ways,
+            dataset_mode=dataset_mode,
         )
 
         # Optimizers
