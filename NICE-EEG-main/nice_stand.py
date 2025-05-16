@@ -122,19 +122,19 @@ parser.add_argument(
 # MultiScaleTemporalConvBlock parameters
 parser.add_argument(
     "--mstc_out_channels",
-    default=40,
+    default=42,
     type=int,
     help="Number of output channels for MultiScaleTemporalConvBlock"
 )
 parser.add_argument(
     "--mstc_kernel_sizes",
-    default="3,11,25,25",
+    default="3,15,21",
     type=str,
     help="Comma-separated list of kernel sizes for MultiScaleTemporalConvBlock"
 )
 parser.add_argument(
     "--mstc_dilation_rates",
-    default="1,1,1,2",
+    default="1,3,3",
     type=str,
     help="Comma-separated list of dilation rates for MultiScaleTemporalConvBlock"
 )

@@ -23,7 +23,7 @@ parameters:
     min: 1e-6
     max: 1e-3
   mstc_out_channels:
-    values: [20, 32, 40, 50]
+    values: [21, 33, 42, 54]
   mstc_kernel_sizes:
     values: ["3,11,25", "3,15,21", "3,15,25", "3,11,15"]
   mstc_dilation_rates:
@@ -31,7 +31,7 @@ parameters:
   mstc_pool_kernel_size:
     values: ["1,51", "1,45", "1,35"]
   mstc_pool_stride:
-    values: ["1,5", "1,10", "1,15"]
+    values: ["1,5", "1,7", "1,11"]
   mstc_dropout_p:
     distribution: uniform
     min: 0.1

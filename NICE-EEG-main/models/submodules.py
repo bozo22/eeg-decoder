@@ -181,7 +181,7 @@ class MultiScaleTemporalConvBlock(nn.Module):
             )
 
         # feature-level channel-attention (SE)
-        self.se = SqueezeExcite(out_ch, reduction=8)
+        self.se = SqueezeExcite(out_ch, hidden_dim=5)
 
         # 1×1 conv to mix branch features (acts like a pointwise projection)
         self.mix = nn.Sequential(
@@ -222,13 +222,13 @@ class MultiScaleTemporalConvBlock(nn.Module):
 
 class SqueezeExcite(nn.Module):
     """Classic SE block (feature-level channel attention) with reduction ratio."""
-    def __init__(self, chan, reduction=8):
+    def __init__(self, chan, hidden_dim=5):
         super().__init__()
         self.pool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Sequential(
-            nn.Conv2d(chan, chan // reduction, 1, bias=False),
+            nn.Conv2d(chan, hidden_dim, 1, bias=False),
             nn.ELU(inplace=True),
-            nn.Conv2d(chan // reduction, chan, 1, bias=False),
+            nn.Conv2d(hidden_dim, chan, 1, bias=False),
             nn.Sigmoid(),
         )
 
