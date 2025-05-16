@@ -2,7 +2,6 @@ import torch.nn as nn
 import logging as l
 from models.modules import Proj_eeg, Proj_img, Enc_eeg
 from torch.nn import init
-from torch_geometric.nn import GATConv
 
 class SuperNICE(nn.Module):
     def __init__(self, args):
@@ -60,6 +59,6 @@ def weights_init_normal(m):
             init.constant_(m.bias, 0.0)
 
     # Normalisation layers
-    if isinstance(m, (nn.BatchNorm2d, nn.LayerNorm)):
+    elif isinstance(m, (nn.BatchNorm2d, nn.LayerNorm)):
         init.normal_(m.weight, mean=1.0, std=0.02)
         init.constant_(m.bias, 0.0)
