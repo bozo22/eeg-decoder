@@ -72,6 +72,14 @@ parser.add_argument(
     choices=["gpu", "cpu"],
     help="Device to use for training.",
 )
+parser.add_argument(
+    "--mode",
+    default=None,
+    type=str,
+    choices=["debug", "small_run"],
+    help="If `debug`, will run in debug mode with only 100 samples per subject. If `small_run`, will use only  25% of the dataset.",
+)
+parser.add_argument("--split_val_set_per_condition", action="store_true", help="Get the val set by splitting by conditions, keeping all samples for each condition together.")
 parser.add_argument("--mixup", action="store_true", help="Use mixup data augmentation")
 parser.add_argument(
     "--mixup-alpha", type=float, default=0.2, help="Mixup alpha parameter"
@@ -80,11 +88,6 @@ parser.add_argument(
     "--mixup_in_class",
     action="store_true",
     help="Use mixup data augmentation within the same class",
-)
-parser.add_argument(
-    "--debug",
-    action="store_true",
-    help="If True, will run in debug mode with only a fraction of the dataset.",
 )
 # WandB parameters
 parser.add_argument(
@@ -133,10 +136,10 @@ device = torch.device(
 )
 print(f"Using device: {device}")
 # Set debug logger, if debug is True
-if args.debug:
+if args.mode == "debug":
     l.basicConfig(level=l.DEBUG, format="%(levelname)s: %(message)s")
     l.debug(">>> Running in DEBUG mode!")
-tqdm.__init__ = partialmethod(tqdm.__init__, disable=False if args.debug else True)
+tqdm.__init__ = partialmethod(tqdm.__init__, disable=False if args.mode == "debug" else True)
 
 # ===== Seed experiments =====
 seed_experiments(args.seed)
@@ -156,7 +159,7 @@ pprint(args)
 
 # ===== Prepare run name =====
 run_name = f"lr({args.lr})-proj_dim({args.proj_dim})"
-if args.debug:
+if args.mode == "debug":
     run_name = "[DEBUG]" + run_name
 
 if args.use_image_projector:
@@ -172,7 +175,16 @@ wandb.define_metric("epoch")
 wandb.define_metric("train/*", step_metric="epoch")
 wandb.define_metric("val/*", step_metric="epoch")
 
-
+# ===== Pre-run setup =====
+dataset_mode = None
+if args.mode == "small_run":
+    epochs = 30
+    print(f">>> Training with small run (25% of the dataset and {epochs} epochs)")
+    dataset_mode = "small"
+    args.epoch = epochs
+elif args.mode == "debug":
+    print(">>> Training with debug mode (100 training EEG samples per subject only)")
+    dataset_mode = "debug"
 
 # Image2EEG
 class IE:
@@ -236,14 +248,12 @@ class IE:
             self.args.dnn,
             self.nSub,
             self.batch_size,
-            debug=args.debug,
-
             mixup_in_class=self.use_mixup_in_class, 
             use_mixup=self.use_mixup, 
             mixup_val_set_size=self.val_set_size,
-            mixup_alpha=self.mixup_alpha,
-            device=device,
             n_ways=self.n_ways,
+            dataset_mode=dataset_mode,
+            val_set_per_condition=self.args.split_val_set_per_condition,
         )
 
         # Optimizers
