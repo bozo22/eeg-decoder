@@ -90,18 +90,16 @@ class EEG_GAT(nn.Module):
         )
         self.num_channels = 63
         # Create a list of tuples representing all possible edges between channels
-        self.edge_index_list = torch.Tensor(
+        edge_index_list = torch.Tensor(
             [
                 (i, j)
                 for i in range(self.num_channels)
                 for j in range(self.num_channels)
                 if i != j
             ]
-        ).cuda()
-        # Convert the list of tuples to a tensor
-        self.edge_index = (
-            torch.tensor(self.edge_index_list, dtype=torch.long).t().contiguous().cuda()
         )
+        # Convert the list of tuples to a tensor
+        self.register_buffer("edge_index", torch.tensor(edge_index_list, dtype=torch.long).t().contiguous())
 
     def forward(self, x):
         batch_size, _, num_channels, num_features = x.size()
