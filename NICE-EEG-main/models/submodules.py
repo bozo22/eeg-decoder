@@ -190,8 +190,8 @@ class MultiScaleTemporalConvBlock(nn.Module):
             nn.ELU(inplace=True),
         )
 
-        # optional temporal pooling / down-sampling
-        self.pool = nn.AvgPool2d(**pool_cfg) if pool_cfg["stride"] != (1, 1) else nn.Identity()
+        # temporal pooling / down-sampling
+        self.pool = nn.AvgPool2d(**pool_cfg)
 
         # residual path (identity or 1×1 projection)
         if in_ch == out_ch:
@@ -212,7 +212,7 @@ class MultiScaleTemporalConvBlock(nn.Module):
         
         x_cat = self.dropout(x_cat)
         x_cat = self.se(x_cat)                          # feature-level channel attention
-        x_cat = self.pool(x_cat)                        # optional down-sampling
+        x_cat = self.pool(x_cat)                        # temporal down-sampling
 
         # residual add (handles input and output channel mismatch automatically)
         # return nn.ELU(inplace=True)(x_cat + self.residual(self.pool(x))) # interesting as next step

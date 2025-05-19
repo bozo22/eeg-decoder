@@ -10,7 +10,9 @@ command:                     # anything *not* swept stays fixed
   - none
   - --eeg_patch_encoder 
   - multiscale
-  - --small_run
+  - --mode
+  - small_run
+  - --split_val_set_per_condition
 
 method: bayes                # or "random", "grid", "asha"
 metric:
@@ -23,7 +25,7 @@ parameters:
     min: 1e-6
     max: 1e-3
   mstc_out_channels:
-    values: [21, 33, 42, 54]
+    values: [21, 33, 42, 54, 60]
   mstc_kernel_sizes:
     values: ["3,11,25", "3,15,21", "3,15,25", "3,11,15"]
   mstc_dilation_rates:
