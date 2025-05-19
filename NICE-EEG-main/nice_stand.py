@@ -204,7 +204,7 @@ print(f"Using device: {device}")
 if args.mode == "debug":
     l.basicConfig(level=l.DEBUG, format="%(levelname)s: %(message)s")
     l.debug(">>> Running in DEBUG mode!")
-tqdm.__init__ = partialmethod(tqdm.__init__, disable=False if args.debug else True)
+tqdm.__init__ = partialmethod(tqdm.__init__, disable=False if args.mode == "debug" else True)
 
 # ===== Seed experiments =====
 seed_experiments(args.seed)
