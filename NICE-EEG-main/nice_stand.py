@@ -15,6 +15,7 @@ import wandb
 
 import torch
 import torch.nn as nn
+from torch import Tensor
 
 from functools import partialmethod
 from tqdm import tqdm
@@ -26,7 +27,7 @@ from utils.utils import (
     seed_experiments,
     wandb_login,
 )
-from utils.dataset import get_dataloaders
+from utils.dataset import get_dataloaders, mixup
 
 # gpus = [0]
 # os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
@@ -72,14 +73,21 @@ parser.add_argument(
     help="Device to use for training.",
 )
 parser.add_argument(
-    "--debug",
-    action="store_true",
-    help="If True, will run in debug mode with only a very small fraction of the dataset.",
+    "--mode",
+    default=None,
+    type=str,
+    choices=["debug", "small_run"],
+    help="If `debug`, will run in debug mode with only 100 samples per subject. If `small_run`, will use only  25% of the dataset.",
+)
+parser.add_argument("--split_val_set_per_condition", action="store_true", help="Get the val set by splitting by conditions, keeping all samples for each condition together.")
+parser.add_argument("--mixup", action="store_true", help="Use mixup data augmentation")
+parser.add_argument(
+    "--mixup-alpha", type=float, default=0.2, help="Mixup alpha parameter"
 )
 parser.add_argument(
-    "--small_run",
+    "--mixup_in_class",
     action="store_true",
-    help="If true, will use the small run (25 percent of the dataset and 10 epochs)",
+    help="Use mixup data augmentation within the same class",
 )
 # WandB parameters
 parser.add_argument(
@@ -163,6 +171,11 @@ parser.add_argument(
     help="Dropout probability for EEG patch encoder"
 )
 args = parser.parse_args()
+if args.mixup and args.mixup_in_class:
+    raise ValueError(
+        "Cannot use both mixup across classes and mixup within the same class. Please choose one."
+    )
+pprint(args)
 
 # ===== WandB setup =====
 wandb_login(args.disable_wandb)
@@ -206,7 +219,7 @@ assert len(args.mstc_pool_kernel_size) == len(args.mstc_pool_stride), "Pool kern
 
 # ===== Prepare run name =====
 run_name = f"lr({args.lr})-proj_dim({args.proj_dim})"
-if args.debug:
+if args.mode == "debug":
     run_name = "[DEBUG]" + run_name
 
 if args.use_image_projector:
@@ -221,14 +234,14 @@ if args.eeg_patch_encoder == "multiscale":
 run.name = run_name
 
 # ===== Pre-run setup =====
-assert not (args.small_run and args.debug), "Cannot have both `small_run` and `debug` mode enabled"
 dataset_mode = None
-if args.small_run:
-    print(">>> Training with small run (25% of the dataset and 10 epochs)")
+if args.mode == "small_run":
+    epochs = 30
+    print(f">>> Training with small run (25% of the dataset and {epochs} epochs)")
     dataset_mode = "small"
-    args.epoch = 30
-elif args.debug:
-    print(">>> Training with debug mode (100 training EEG samples only)")
+    args.epoch = epochs
+elif args.mode == "debug":
+    print(">>> Training with debug mode (100 training EEG samples per subject only)")
     dataset_mode = "debug"
 
 # Image2EEG
@@ -242,6 +255,11 @@ class IE:
         self.batch_size_img = 500
         self.n_epochs = args.epoch
         self.n_ways = n_ways
+        self.val_set_size = 740
+
+        self.use_mixup = args.mixup
+        self.mixup_alpha = args.mixup_alpha
+        self.use_mixup_in_class = args.mixup_in_class
 
         # Optimizer parameters
         self.lr = args.lr
@@ -288,8 +306,12 @@ class IE:
             self.args.dnn,
             self.nSub,
             self.batch_size,
+            mixup_in_class=self.use_mixup_in_class, 
+            use_mixup=self.use_mixup, 
+            mixup_val_set_size=self.val_set_size,
             n_ways=self.n_ways,
             dataset_mode=dataset_mode,
+            val_set_per_condition=self.args.split_val_set_per_condition
         )
 
         # Optimizers
@@ -316,11 +338,23 @@ class IE:
 
                 # img = Variable(img.cuda().type(self.Tensor))
                 eeg = eeg.to(device)
-                img = img.to(device)
-                labels = torch.arange(eeg.shape[0]).to(device)  # used for the loss
+                img_features = img.to(device)
+                
 
-                # Feed through the model
-                eeg_features, img_features = self.model(eeg, img)
+                if self.use_mixup:
+                    # Apply mixup to both EEG and image features using the same permutation and lambda
+                    # This maintains correspondence between mixed samples
+                    mixed_eeg, mixed_img = mixup(self.mixup_alpha, eeg, img_features, device)
+
+                    # Ensure all tensors are of the same type
+                    mixed_eeg = mixed_eeg.type(torch.FloatTensor).to(device)
+                    mixed_img = mixed_img.type(torch.FloatTensor).to(device)
+                    
+                    eeg = torch.concatenate((eeg, mixed_eeg), axis=0)
+                    img_features = torch.concatenate((img_features, mixed_img), axis=0)
+
+                labels = torch.arange(eeg.shape[0]).to(device)
+                eeg_features, img_features = self.model(eeg, img_features)
 
                 # cosine similarity as the logits
                 logit_scale = self.logit_scale.exp()
