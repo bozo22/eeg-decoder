@@ -120,7 +120,6 @@ parser.add_argument(
     help="Configuration for the EEG encoder.",
 )
 
-# Debug higher scores
 args = parser.parse_args()
 
 if args.mixup and args.mixup_in_class:
