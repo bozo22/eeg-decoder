@@ -201,7 +201,7 @@ device = torch.device(
 )
 print(f"Using device: {device}")
 # ===== Set debug logger, if debug is True =====
-if args.debug:
+if args.mode == "debug":
     l.basicConfig(level=l.DEBUG, format="%(levelname)s: %(message)s")
     l.debug(">>> Running in DEBUG mode!")
 tqdm.__init__ = partialmethod(tqdm.__init__, disable=False if args.debug else True)
