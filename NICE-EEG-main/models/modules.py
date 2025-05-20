@@ -75,25 +75,41 @@ class PatchEmbedding(nn.Module):
                 nn.Dropout(0.5),
             )
         elif type == "multiscale":
+            intermediate_channels = 21
             self.patch_encoder = nn.Sequential(
                 MultiScaleTemporalConvBlock(
                     in_ch=1,
-                    out_ch=kwargs.get('mstc_out_channels', 40),
-                    kernel_sizes=kwargs.get('mstc_kernel_sizes', (3, 11, 25, 25)),
-                    dilation_rates=kwargs.get('mstc_dilation_rates', (1, 1, 1, 2)),
+                    out_ch=intermediate_channels,
+                    kernel_sizes=(3, 11, 25),
+                    dilation_rates=(1, 2, 3),
                     pool_cfg=dict(
-                        kernel_size=kwargs.get('mstc_pool_kernel_size', (1, 51)),
-                        stride=kwargs.get('mstc_pool_stride', (1, 5))
+                        kernel_size=(1, 30),
+                        stride=(1, 3)
                     ),
-                    dropout_p=kwargs.get('mstc_dropout_p', 0.1)
+                    dropout_p=0.25,
                 ),
-                nn.Conv2d(kwargs.get('mstc_out_channels', 40), 40, (63, 1), (1, 1)),
-                nn.BatchNorm2d(40),
+                # Spatial convolution
+                nn.Conv2d(intermediate_channels, intermediate_channels, (63, 1), (1, 1), groups=intermediate_channels),
+                # Mixing branch along channel dimension
+                nn.Conv2d(intermediate_channels, intermediate_channels, 1, bias=False),
+                nn.BatchNorm2d(intermediate_channels),
                 nn.ELU(),
-                nn.Dropout2d(kwargs.get('pe_dropout_p', 0.2)),
+                nn.Dropout2d(0.25),
+
+                MultiScaleTemporalConvBlock(
+                    in_ch=intermediate_channels,
+                    out_ch=42,
+                    kernel_sizes=(3, 9, 15),
+                    dilation_rates=(1, 2, 3),
+                    pool_cfg=dict(
+                        kernel_size=(1, 7),
+                        stride=(1, 3)
+                    ),
+                    dropout_p=0.25,
+                ),
             )
         self.projection = nn.Sequential(
-            nn.Conv2d(40, emb_size, (1, 1), stride=(1, 1)),
+            nn.Conv2d(42, emb_size, (1, 1), stride=(1, 1)),
             Rearrange("b e (h) (w) -> b (h w) e"),
         )
 

@@ -136,37 +136,37 @@ parser.add_argument(
 )
 parser.add_argument(
     "--mstc_kernel_sizes",
-    default="3,15,21",
+    default="3,11,25",
     type=str,
     help="Comma-separated list of kernel sizes for MultiScaleTemporalConvBlock"
 )
 parser.add_argument(
     "--mstc_dilation_rates",
-    default="1,3,3",
+    default="1,2,3",
     type=str,
     help="Comma-separated list of dilation rates for MultiScaleTemporalConvBlock"
 )
 parser.add_argument(
     "--mstc_pool_kernel_size",
-    default="1,51",
+    default="1,30",
     type=str,
     help="Comma-separated tuple of kernel size for pooling in MultiScaleTemporalConvBlock"
 )
 parser.add_argument(
     "--mstc_pool_stride",
-    default="1,5",
+    default="1,3",
     type=str,
     help="Comma-separated tuple of stride for pooling in MultiScaleTemporalConvBlock"
 )
 parser.add_argument(
     "--mstc_dropout_p",
-    default=0.1,
+    default=0.25,
     type=float,
     help="Dropout probability for MultiScaleTemporalConvBlock"
 )
 parser.add_argument(
     "--pe_dropout_p",
-    default=0.2,
+    default=0.25,
     type=float,
     help="Dropout probability for EEG patch encoder"
 )
