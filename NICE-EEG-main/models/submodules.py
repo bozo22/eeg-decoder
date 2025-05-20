@@ -212,10 +212,9 @@ class MultiScaleTemporalConvBlock(nn.Module):
         
         x_cat = self.dropout(x_cat)
         x_cat = self.se(x_cat)                          # feature-level channel attention
-        x_cat = self.pool(x_cat)                        # temporal down-sampling
 
-        # residual add (handles input and output channel mismatch automatically)
-        # return nn.ELU(inplace=True)(x_cat + self.residual(self.pool(x))) # interesting as next step
+        # residual add
+        x_cat = self.pool(x_cat + self.residual(x))
         return x_cat
 
 
