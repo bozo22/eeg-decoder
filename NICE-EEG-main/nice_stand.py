@@ -123,52 +123,8 @@ parser.add_argument(
     "--eeg_patch_encoder",
     default="tsconv",
     type=str,
-    choices=["tsconv", "multiscale"],
+    choices=["tsconv", "multiscale_1block", "multiscale_2block"],
     help="Configuration for the EEG patch encoder"
-)
-
-# MultiScaleTemporalConvBlock parameters
-parser.add_argument(
-    "--mstc_out_channels",
-    default=42,
-    type=int,
-    help="Number of output channels for MultiScaleTemporalConvBlock"
-)
-parser.add_argument(
-    "--mstc_kernel_sizes",
-    default="3,11,25",
-    type=str,
-    help="Comma-separated list of kernel sizes for MultiScaleTemporalConvBlock"
-)
-parser.add_argument(
-    "--mstc_dilation_rates",
-    default="1,2,3",
-    type=str,
-    help="Comma-separated list of dilation rates for MultiScaleTemporalConvBlock"
-)
-parser.add_argument(
-    "--mstc_pool_kernel_size",
-    default="1,30",
-    type=str,
-    help="Comma-separated tuple of kernel size for pooling in MultiScaleTemporalConvBlock"
-)
-parser.add_argument(
-    "--mstc_pool_stride",
-    default="1,3",
-    type=str,
-    help="Comma-separated tuple of stride for pooling in MultiScaleTemporalConvBlock"
-)
-parser.add_argument(
-    "--mstc_dropout_p",
-    default=0.25,
-    type=float,
-    help="Dropout probability for MultiScaleTemporalConvBlock"
-)
-parser.add_argument(
-    "--pe_dropout_p",
-    default=0.25,
-    type=float,
-    help="Dropout probability for EEG patch encoder"
 )
 args = parser.parse_args()
 if args.mixup and args.mixup_in_class:
@@ -209,14 +165,6 @@ tqdm.__init__ = partialmethod(tqdm.__init__, disable=False if args.mode == "debu
 # ===== Seed experiments =====
 seed_experiments(args.seed)
 
-# ===== Parse comma-separated arguments into tuples/lists =====
-args.mstc_kernel_sizes = tuple(map(int, args.mstc_kernel_sizes.split(',')))
-args.mstc_dilation_rates = tuple(map(int, args.mstc_dilation_rates.split(',')))
-assert len(args.mstc_kernel_sizes) == len(args.mstc_dilation_rates), "Kernel sizes and dilation rates must have the same length"
-args.mstc_pool_kernel_size = tuple(map(int, args.mstc_pool_kernel_size.split(',')))
-args.mstc_pool_stride = tuple(map(int, args.mstc_pool_stride.split(',')))
-assert len(args.mstc_pool_kernel_size) == len(args.mstc_pool_stride), "Pool kernel size and stride must have the same length"
-
 # ===== Prepare run name =====
 run_name = f"lr({args.lr})-proj_dim({args.proj_dim})"
 if args.mode == "debug":
@@ -229,8 +177,6 @@ else:
     print(f">>> Skipping image projector")
     run_name = f"skipIP-" + run_name
 run_name = f"{args.eeg_patch_encoder}-" + run_name
-if args.eeg_patch_encoder == "multiscale":
-    run_name = f"mstc-do({args.mstc_dropout_p})-outChn({args.mstc_out_channels})-kSize({args.mstc_kernel_sizes})-dil({args.mstc_dilation_rates})-poolKSize({args.mstc_pool_kernel_size})-poolStride({args.mstc_pool_stride})-peDo({args.pe_dropout_p})-" + run_name
 run.name = run_name
 
 # ===== Pre-run setup =====

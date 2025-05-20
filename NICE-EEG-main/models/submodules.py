@@ -16,6 +16,8 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 
 
+NUM_CHANNELS = 63
+
 class channel_attention(nn.Module):
     def __init__(self, sequence_num=250, inter=30):
         super(channel_attention, self).__init__()
@@ -149,8 +151,8 @@ class MultiScaleTemporalConvBlock(nn.Module):
         self,
         in_ch: int,
         out_ch: int,
-        kernel_sizes=(3, 11, 25, 25),
-        dilation_rates=(1, 1, 1, 2),
+        kernel_sizes=(3, 11, 25),
+        dilation_rates=(1, 1, 1),
         pool_cfg=dict(kernel_size=(1, 51), stride=(1, 5)),  # set stride>1 to down-sample
         dropout_p: float = 0.1,
     ):

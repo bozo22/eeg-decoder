@@ -9,7 +9,12 @@ class SuperNICE(nn.Module):
 
         # Config for both Img and EEG depending on the image features type extraced by CLIP
         self.img_projector_input_dim = 768
-        self.eeg_projector_input_dim = 1440 if args.eeg_patch_encoder == "tsconv" else 920
+        if args.eeg_patch_encoder == "tsconv":
+            self.eeg_projector_input_dim = 1440
+        elif args.eeg_patch_encoder == "multiscale_1block":
+            self.eeg_projector_input_dim = 1760
+        elif args.eeg_patch_encoder == "multiscale_2block":
+            self.eeg_projector_input_dim = 1400
         # Standard parameters for both Img and EEG projectors
         self.proj_dim = args.proj_dim
         self.eeg_proj_do = 0.5

@@ -3,8 +3,7 @@ import torch.nn as nn
 import torch as th
 from torch import Tensor
 from einops.layers.torch import Rearrange
-from models.submodules import Debugger, MultiScaleTemporalConvBlock, ResidualAdd, EEG_GAT, channel_attention, FlattenHead
-
+from models.submodules import Debugger, MultiScaleTemporalConvBlock, ResidualAdd, EEG_GAT, SqueezeExcite, channel_attention, FlattenHead, NUM_CHANNELS
 
 # ===== EEG Encoder =====
 class Enc_eeg(nn.Sequential):
@@ -65,6 +64,7 @@ class PatchEmbedding(nn.Module):
         super().__init__()
         if type == "tsconv":
         # revised from shallownet
+            final_channels = 40
             self.patch_encoder = nn.Sequential(
                 nn.Conv2d(1, 40, (1, 25), (1, 1)),
                 nn.AvgPool2d((1, 51), (1, 5)),
@@ -75,31 +75,54 @@ class PatchEmbedding(nn.Module):
                 nn.ELU(),
                 nn.Dropout(0.5),
             )
-        elif type == "multiscale":
-            intermediate_channels = 21
+        elif type == "multiscale_1block":
+            final_channels = 42
             self.patch_encoder = nn.Sequential(
                 MultiScaleTemporalConvBlock(
                     in_ch=1,
-                    out_ch=intermediate_channels,
-                    kernel_sizes=(3, 11, 25),
+                    out_ch=final_channels,
+                    kernel_sizes=(3, 11, 21),
                     dilation_rates=(1, 2, 3),
                     pool_cfg=dict(
-                        kernel_size=(1, 30),
-                        stride=(1, 3)
+                        kernel_size=(1, 35),
+                        stride=(1, 5)
                     ),
                     dropout_p=0.25,
                 ),
-                # Spatial convolution
-                nn.Conv2d(intermediate_channels, intermediate_channels, (63, 1), (1, 1), groups=intermediate_channels),
-                # Mixing branch along channel dimension
-                nn.Conv2d(intermediate_channels, intermediate_channels, 1, bias=False),
-                nn.BatchNorm2d(intermediate_channels),
+                nn.Conv2d(final_channels, final_channels, (63, 1), (1, 1)),
+                nn.BatchNorm2d(final_channels),
                 nn.ELU(),
-                nn.Dropout2d(0.25),
+                nn.Dropout2d(0.2),
+            )
+        elif type == "multiscale_2block":
+            intermediate_channels = 33
+            final_channels = 42
+            self.patch_encoder = nn.Sequential(
+                # Temporal block 1
+                MultiScaleTemporalConvBlock(
+                    in_ch=1,
+                    out_ch=intermediate_channels,
+                    kernel_sizes=(3, 11, 21),
+                    dilation_rates=(1, 2, 3),
+                    pool_cfg=dict(
+                        kernel_size=(1, 30),
+                        stride=(1, 2)
+                    ),
+                    dropout_p=0.25,
+                ),
 
+                # Spatial electrode-level SE & mixing across electrodes
+                Rearrange("b c h w -> b h c w"),
+                SqueezeExcite(NUM_CHANNELS),
+                nn.Conv2d(NUM_CHANNELS, NUM_CHANNELS, 1, bias=False),
+                nn.BatchNorm2d(NUM_CHANNELS),
+                nn.ELU(inplace=True),
+                Rearrange("b h c w -> b c h w"),
+
+                # Temporal block 2
                 MultiScaleTemporalConvBlock(
                     in_ch=intermediate_channels,
-                    out_ch=42,
+                    out_ch=final_channels,
                     kernel_sizes=(3, 9, 15),
                     dilation_rates=(1, 2, 3),
                     pool_cfg=dict(
@@ -108,9 +131,15 @@ class PatchEmbedding(nn.Module):
                     ),
                     dropout_p=0.25,
                 ),
+
+                # Spatial compacting
+                nn.Conv2d(final_channels, final_channels, (63, 1), (1, 1)),
+                nn.BatchNorm2d(final_channels),
+                nn.ELU(),
             )
+        
         self.projection = nn.Sequential(
-            nn.Conv2d(42, emb_size, (1, 1), stride=(1, 1)),
+            nn.Conv2d(final_channels, emb_size, (1, 1), stride=(1, 1)),
             Rearrange("b e (h) (w) -> b (h w) e"),
         )
 
