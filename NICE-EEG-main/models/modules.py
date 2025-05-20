@@ -10,6 +10,7 @@ from models.submodules import Debugger, MultiScaleTemporalConvBlock, ResidualAdd
 class Enc_eeg(nn.Sequential):
     def __init__(self, emb_size=40, config="GA", patch_encoder="tsconv", **kwargs):
         super().__init__(
+            nn.InstanceNorm2d(num_features=1), # Normalize each trial
             SpatialEncoder(config),
             PatchEmbedding(emb_size, patch_encoder, **kwargs),
             FlattenHead(),

@@ -15,7 +15,7 @@ import wandb
 
 import torch
 import torch.nn as nn
-from torch import Tensor
+from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
 
 from functools import partialmethod
 from tqdm import tqdm
@@ -256,6 +256,7 @@ class IE:
         self.n_epochs = args.epoch
         self.n_ways = n_ways
         self.val_set_size = 740
+        self.nSub = nsub
 
         self.use_mixup = args.mixup
         self.mixup_alpha = args.mixup_alpha
@@ -265,7 +266,8 @@ class IE:
         self.lr = args.lr
         self.b1 = 0.5
         self.b2 = 0.999
-        self.nSub = nsub
+        self.weight_decay = 1e-4
+        self.warmup_epochs = 5
 
         self.start_epoch = 0
         self.eeg_data_path = os.path.join(args.dataset_path, "Preprocessed_data_250Hz")
@@ -314,9 +316,25 @@ class IE:
             val_set_per_condition=self.args.split_val_set_per_condition
         )
 
-        # Optimizers
-        self.optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2)
+        # Optimizer & Scheduler
+        self.optimizer = torch.optim.AdamW(
+            self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2), weight_decay=self.weight_decay
+        )
+        # Warmup for the first 5 epochs
+        warmup_scheduler = LinearLR(
+            self.optimizer,
+            start_factor=0.2,
+            total_iters=self.warmup_epochs,
+        )
+        cosine_scheduler = CosineAnnealingLR(
+            self.optimizer,
+            T_max=self.n_epochs - self.warmup_epochs,
+            eta_min=args.lr * 0.1,
+        )
+        self.scheduler = SequentialLR(
+            self.optimizer,
+            schedulers=[warmup_scheduler, cosine_scheduler],
+            milestones=[self.warmup_epochs],
         )
 
         num = 0
@@ -375,7 +393,8 @@ class IE:
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-
+            
+            self.scheduler.step()
             # Log epoch metrics
             avg_epoch_loss = sum(epoch_losses) / len(epoch_losses)
             avg_epoch_loss_eeg = sum(epoch_losses_eeg) / len(epoch_losses_eeg)
