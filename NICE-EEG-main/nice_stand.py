@@ -15,7 +15,7 @@ import wandb
 
 import torch
 import torch.nn as nn
-from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
+from torch.optim.lr_scheduler import OneCycleLR
 
 from functools import partialmethod
 from tqdm import tqdm
@@ -213,7 +213,6 @@ class IE:
         self.b1 = 0.5
         self.b2 = 0.999
         self.weight_decay = 1e-4
-        self.warmup_epochs = 5
 
         self.start_epoch = 0
         self.eeg_data_path = os.path.join(args.dataset_path, "Preprocessed_data_250Hz")
@@ -266,22 +265,13 @@ class IE:
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2), weight_decay=self.weight_decay
         )
-        # Warmup for the first 5 epochs
-        warmup_scheduler = LinearLR(
+        self.scheduler = OneCycleLR(
             self.optimizer,
-            start_factor=0.2,
-            total_iters=self.warmup_epochs,
-        )
-        cosine_scheduler = CosineAnnealingLR(
-            self.optimizer,
-            T_max=self.n_epochs - self.warmup_epochs,
-            eta_min=args.lr * 0.1,
-        )
-        self.scheduler = SequentialLR(
-            self.optimizer,
-            schedulers=[warmup_scheduler, cosine_scheduler],
-            milestones=[self.warmup_epochs],
-        )
+            max_lr    = self.lr,            # same base
+            div_factor= 25,              # start lr = max_lr/25
+            pct_start = 0.3,             # up-ramp for 30 % of training
+            total_steps = len(train_loader) * epochs,
+)
 
         num = 0
         best_loss_val = np.inf
@@ -340,7 +330,7 @@ class IE:
                 loss.backward()
                 self.optimizer.step()
             
-            self.scheduler.step()
+                self.scheduler.step()
             # Log epoch metrics
             avg_epoch_loss = sum(epoch_losses) / len(epoch_losses)
             avg_epoch_loss_eeg = sum(epoch_losses_eeg) / len(epoch_losses_eeg)
