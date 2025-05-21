@@ -270,7 +270,7 @@ class IE:
             max_lr    = self.lr,            # same base
             div_factor= 25,              # start lr = max_lr/25
             pct_start = 0.3,             # up-ramp for 30 % of training
-            total_steps = len(train_loader) * epochs,
+            total_steps = len(train_loader) * self.n_epochs,
 )
 
         num = 0
