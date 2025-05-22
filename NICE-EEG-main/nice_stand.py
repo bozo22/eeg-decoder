@@ -218,11 +218,7 @@ class IE:
 
         self.model = SuperNICE(args)
         self.model.to(device)
-
-        # self.criterion_l1 = torch.nn.L1Loss().cuda()
-        # self.criterion_l2 = torch.nn.MSELoss().cuda()
         self.criterion_cls = torch.nn.CrossEntropyLoss().to(device)
-
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         print("initial define done.")
 
@@ -260,11 +256,12 @@ class IE:
             self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2)
         )
 
-        num = 0
-        best_loss_val = np.inf
+        # Metrics
+        best_val_top1 = 0
+        # dim1 - for train/val, dim2 - for epoch, dim3 - for loss/loss_eeg/loss_img/top1acc
         train_results = np.zeros(
-            (2, self.n_epochs, 3)
-        )  # dim1 - for train/val, dim2 - for epoch, dim3 - for loss/loss_eeg/loss_img
+            (2, self.n_epochs, 4)
+        )
 
         for e in range(self.n_epochs):
             epoch_losses = []
@@ -304,7 +301,6 @@ class IE:
 
                 loss_eeg = self.criterion_cls(logits_per_eeg, labels)
                 loss_img = self.criterion_cls(logits_per_img, labels)
-
                 loss_cos = (loss_eeg + loss_img) / 2
 
                 # total loss
@@ -332,6 +328,7 @@ class IE:
             train_results[0, e, 0] = avg_epoch_loss
             train_results[0, e, 1] = avg_epoch_loss_eeg
             train_results[0, e, 2] = avg_epoch_loss_img
+            # No top1 accuracy for the train set
 
             # ===== Validation =====
             if (e + 1) % 1 == 0:
@@ -342,6 +339,8 @@ class IE:
                     val_losses = []
                     val_losses_eeg = []
                     val_losses_img = []
+                    val_top1 = 0
+                    total_val_samples = 0
                     for veeg, vimg in tqdm(val_loader):
 
                         veeg = veeg.to(device)
@@ -365,9 +364,17 @@ class IE:
                         val_losses_eeg.append(vloss_eeg.item())
                         val_losses_img.append(vloss_img.item())
 
+                        # top1 accuracy for the val set
+                        similarity = (veeg_features @ vimg_features.t()).softmax(dim=-1)
+                        _, indices = similarity.topk(1)
+                        vlabels = vlabels.view(-1, 1)
+                        val_top1 += (indices == vlabels).sum().item()
+                        total_val_samples += vlabels.size(0)
+
                     avg_val_loss = sum(val_losses) / len(val_losses)
                     avg_val_loss_eeg = sum(val_losses_eeg) / len(val_losses_eeg)
                     avg_val_loss_img = sum(val_losses_img) / len(val_losses_img)
+                    val_top1 = val_top1 / total_val_samples
                     wandb.log(
                         {
                             "epoch": e + 1,
@@ -379,8 +386,9 @@ class IE:
                     train_results[1, e, 0] = avg_val_loss
                     train_results[1, e, 1] = avg_val_loss_eeg
                     train_results[1, e, 2] = avg_val_loss_img
-                    if vloss <= best_loss_val:
-                        best_loss_val = vloss
+                    train_results[1, e, 3] = val_top1
+                    if val_top1 >= best_val_top1:
+                        best_val_top1 = val_top1
                         best_epoch = e + 1
                         os.makedirs(model_checkpoint_path, exist_ok=True)
                         print(f"New best epoch - {best_epoch}")
@@ -392,9 +400,9 @@ class IE:
                 print(
                     "Epoch:",
                     e + 1,
-                    "  Cos eeg: %.4f" % loss_eeg.detach().cpu().numpy(),
-                    "  Cos img: %.4f" % loss_img.detach().cpu().numpy(),
-                    "  loss val: %.4f" % vloss.detach().cpu().numpy(),
+                    "  Avg train loss: %.4f" % avg_epoch_loss,
+                    "  Val top1: %.4f" % val_top1,
+                    "  Val loss: %.4f" % vloss.detach().cpu().numpy(),
                 )
 
             endtime_epoch = time.time()
@@ -411,7 +419,7 @@ class IE:
         self.model, save_path = load_model(
             self.model, model_checkpoint_path, run_name, self.nSub
         )
-        save_checkpoint_wandb(save_path, self.nSub, best_loss_val)
+        save_checkpoint_wandb(save_path, self.nSub, best_val_top1)
         self.model.eval()
 
         with torch.no_grad():
@@ -467,8 +475,7 @@ class IE:
         for i, n_way in enumerate(self.n_ways):
             print(f"  {n_way}-way: {n_way_top1_acc[i]:.6f}")
 
-        return top1_acc, top3_acc, top5_acc, train_results, n_way_top1_acc
-        # writer.close()
+        return top1_acc, top3_acc, top5_acc, n_way_top1_acc, train_results, best_val_top1
 
 
 def main():
@@ -480,7 +487,7 @@ def main():
     aver3 = []
     aver5 = []
     avern = []
-
+    best_val_top1_avg = 0
     for i in range(num_sub):
 
         cal_num += 1
@@ -490,7 +497,7 @@ def main():
         print("Subject %d" % (i + 1))
         ie = IE(args, n_ways, i + 1)
 
-        Acc, Acc3, Acc5, train_results, n_way_top1_acc = ie.train()
+        Acc, Acc3, Acc5, n_way_top1_acc, train_results, best_val_top1 = ie.train()
         print("THE BEST ACCURACY IS " + str(Acc))
 
         endtime = time.time()
@@ -500,6 +507,7 @@ def main():
         aver3.append(Acc3)
         aver5.append(Acc5)
         avern.append(n_way_top1_acc)
+        best_val_top1_avg += best_val_top1
 
         avg_train_results.append(train_results)
 
@@ -510,17 +518,19 @@ def main():
         for e in range(len(avg_train_results[i])):
             epoch = e + 1
             for k in range(len(avg_train_results[i][e])):
-                metric = "loss" if k == 0 else "loss_eeg" if k == 1 else "loss_img"
+                metric_name = {0: "loss", 1: "loss_eeg", 2: "loss_img", 3: "top1"}
                 wandb.log(
-                    {"epoch": epoch, f"{mode}/{metric}": avg_train_results[i][e][k]}
+                    {"epoch": epoch, f"{mode}/{metric_name[k]}": avg_train_results[i][e][k]}
                 )
+    # Log average (across subjects) best val top1 accuracy
+    wandb.run.summary["val/top1"] = best_val_top1_avg / num_sub
+
     # Compute and log test results
     aver.append(np.mean(aver))
     aver3.append(np.mean(aver3))
     aver5.append(np.mean(aver5))
     avern_a = np.array(avern)
     avern.append(np.mean(avern_a, axis=0))
-
     for i in range(len(aver)):
         if i == len(aver) - 1:
             subj = "ave"

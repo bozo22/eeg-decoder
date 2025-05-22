@@ -31,14 +31,14 @@ def load_model(model, chekpoint_path, run_name, subject_id, device=None):
     return model, save_path
 
 
-def save_checkpoint_wandb(chekpoint_path, subject_id, best_loss_val):
+def save_checkpoint_wandb(chekpoint_path, subject_id, best_val_top1):
     # create an Artifact object
     artifact = wandb.Artifact(
         name=f"BestModel_sub{subject_id}",          # base name in the Artifacts tab
         type="checkpoint",     # arbitrary tag; “model”, “ckpt”, etc. all work
-        description="Best val-loss checkpoint",
+        description="Best val-top1 checkpoint",
         metadata={             # anything you’d like to remember
-            "val_loss": float(best_loss_val),
+            "val_top1": float(best_val_top1),
             "subject_id": subject_id,
         },
     )
