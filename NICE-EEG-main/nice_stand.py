@@ -387,7 +387,7 @@ class IE:
                     train_results[1, e, 1] = avg_val_loss_eeg
                     train_results[1, e, 2] = avg_val_loss_img
                     train_results[1, e, 3] = val_top1
-                    if val_top1 >= best_val_top1:
+                    if val_top1 > best_val_top1:
                         best_val_top1 = val_top1
                         best_epoch = e + 1
                         os.makedirs(model_checkpoint_path, exist_ok=True)
@@ -402,7 +402,7 @@ class IE:
                     e + 1,
                     "  Avg train loss: %.4f" % avg_epoch_loss,
                     "  Val top1: %.4f" % val_top1,
-                    "  Val loss: %.4f" % vloss.detach().cpu().numpy(),
+                    "  Val loss: %.4f" % avg_val_loss,
                 )
 
             endtime_epoch = time.time()
