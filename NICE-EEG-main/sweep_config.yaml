@@ -9,15 +9,15 @@ command:                     # anything *not* swept stays fixed
   - --config
   - none
   - --eeg_patch_encoder 
-  - multiscale
+  - multiscale_1block
   - --mode
   - small_run
   - --split_val_set_per_condition
 
 method: bayes                # or "random", "grid", "asha"
 metric:
-  name: val/loss             # minimise validation loss
-  goal: minimize
+  name: val/top1
+  goal: maximize
 
 parameters:
   lr:
@@ -37,14 +37,8 @@ parameters:
   mstc_dropout_p:
     distribution: uniform
     min: 0.1
-    max: 0.3
+    max: 0.4
   pe_dropout_p:
     distribution: uniform
     min: 0.1
     max: 0.4
-
-early_terminate:
-  type: hyperband
-  s: 2  
-  eta: 3
-  max_iter: 27

@@ -12,7 +12,8 @@ class SuperNICE(nn.Module):
         if args.eeg_patch_encoder == "tsconv":
             self.eeg_projector_input_dim = 1440
         elif args.eeg_patch_encoder == "multiscale_1block":
-            self.eeg_projector_input_dim = 1760
+            self.eeg_projector_input_dim =  (250 - args.mstc_pool_kernel_size[1]) // args.mstc_pool_stride[1] + 1
+            self.eeg_projector_input_dim = 40 * self.eeg_projector_input_dim
         elif args.eeg_patch_encoder == "multiscale_2block":
             self.eeg_projector_input_dim = 1400
         # Standard parameters for both Img and EEG projectors
@@ -22,14 +23,15 @@ class SuperNICE(nn.Module):
 
         # Extract MSTC parameters if using multiscale encoder
         mstc_kwargs = {}
-        if args.eeg_patch_encoder == "multiscale":
+        if args.eeg_patch_encoder == "multiscale_1block" or args.eeg_patch_encoder == "multiscale_2block":
             mstc_kwargs = {
                 'mstc_out_channels': args.mstc_out_channels,
                 'mstc_kernel_sizes': args.mstc_kernel_sizes,
                 'mstc_dilation_rates': args.mstc_dilation_rates,
                 'mstc_pool_kernel_size': args.mstc_pool_kernel_size,
                 'mstc_pool_stride': args.mstc_pool_stride,
-                'mstc_dropout_p': args.mstc_dropout_p
+                'mstc_dropout_p': args.mstc_dropout_p,
+                'pe_dropout_p': args.pe_dropout_p
             }
         self.Enc_eeg = Enc_eeg(config=args.config, patch_encoder=args.eeg_patch_encoder, **mstc_kwargs)
         self.Proj_eeg = Proj_eeg(

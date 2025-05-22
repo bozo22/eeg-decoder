@@ -25,4 +25,4 @@ export PYTHONUNBUFFERED=1
 
 cd $HOME/eeg-decoder
 # Go to the directory that contains the project, the runnable
-wandb agent EEG_decoder/EEG-Decoder/x3uxj6jz
+wandb agent EEG_decoder/EEG-Decoder/82qwp9sp

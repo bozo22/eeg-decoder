@@ -9,6 +9,7 @@ import logging as l
 from torch.utils.data import DataLoader
 
 
+SMALL_RUN_RATIO = 0.60
 VALIDATION_NR_CONDITIONS = 200 # Same as for test set
 SAMPLES_PER_CONDITION = 10
 TEST_VAL_BATCH_SIZE = 200
@@ -32,8 +33,8 @@ def get_eeg_data(dir_path, data_mode=None):
         print(">>> Using EEG features for 100 training samples only")
         train_data = train_data[:100]
     elif data_mode == "small":
-        print(">>> Using EEG features for 25 percent of the training samples")
-        train_data = train_data[:int(len(train_data) * 0.25)]
+        print(f">>> Using EEG features for {SMALL_RUN_RATIO*100}% of the training samples")
+        train_data = train_data[:int(len(train_data) * SMALL_RUN_RATIO)]
 
     test_data = np.load(
         os.path.join(dir_path, "preprocessed_eeg_test.npy"), allow_pickle=True

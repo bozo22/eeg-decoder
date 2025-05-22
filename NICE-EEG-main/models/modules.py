@@ -76,23 +76,23 @@ class PatchEmbedding(nn.Module):
                 nn.Dropout(0.5),
             )
         elif type == "multiscale_1block":
-            final_channels = 42
+            final_channels = kwargs['mstc_out_channels']
             self.patch_encoder = nn.Sequential(
                 MultiScaleTemporalConvBlock(
                     in_ch=1,
                     out_ch=final_channels,
-                    kernel_sizes=(3, 11, 21),
-                    dilation_rates=(1, 2, 3),
+                    kernel_sizes=kwargs['mstc_kernel_sizes'],
+                    dilation_rates=kwargs['mstc_dilation_rates'],
                     pool_cfg=dict(
-                        kernel_size=(1, 35),
-                        stride=(1, 5)
+                        kernel_size=kwargs['mstc_pool_kernel_size'],
+                        stride=kwargs['mstc_pool_stride']
                     ),
-                    dropout_p=0.25,
+                    dropout_p=kwargs['mstc_dropout_p'],
                 ),
                 nn.Conv2d(final_channels, final_channels, (63, 1), (1, 1)),
                 nn.BatchNorm2d(final_channels),
                 nn.ELU(),
-                nn.Dropout2d(0.2),
+                nn.Dropout2d(kwargs['pe_dropout_p']),
             )
         elif type == "multiscale_2block":
             intermediate_channels = 33
