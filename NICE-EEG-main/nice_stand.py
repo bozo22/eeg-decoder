@@ -22,6 +22,7 @@ from tqdm import tqdm
 from models.SuperNICE import SuperNICE
 from utils.utils import (
     load_model,
+    new_best_epoch,
     save_checkpoint_wandb,
     save_model,
     seed_experiments,
@@ -258,6 +259,7 @@ class IE:
 
         # Metrics
         best_val_top1 = 0
+        best_val_loss = np.inf
         # dim1 - for train/val, dim2 - for epoch, dim3 - for loss/loss_eeg/loss_img/top1acc
         train_results = np.zeros(
             (2, self.n_epochs, 4)
@@ -387,8 +389,12 @@ class IE:
                     train_results[1, e, 1] = avg_val_loss_eeg
                     train_results[1, e, 2] = avg_val_loss_img
                     train_results[1, e, 3] = val_top1
-                    if val_top1 > best_val_top1:
-                        best_val_top1 = val_top1
+
+                    if new_best_epoch(args.split_val_set_per_condition, best_val_loss, best_val_top1, avg_val_loss, val_top1):
+                        if args.split_val_set_per_condition:
+                            best_val_top1 = val_top1
+                        else:
+                            best_val_loss = avg_val_loss
                         best_epoch = e + 1
                         os.makedirs(model_checkpoint_path, exist_ok=True)
                         print(f"New best epoch - {best_epoch}")
@@ -396,7 +402,6 @@ class IE:
                         save_model(
                             self.model, model_checkpoint_path, run_name, self.nSub
                         )
-
                 print(
                     "Epoch:",
                     e + 1,
@@ -419,7 +424,7 @@ class IE:
         self.model, save_path = load_model(
             self.model, model_checkpoint_path, run_name, self.nSub
         )
-        save_checkpoint_wandb(save_path, self.nSub, best_val_top1)
+        save_checkpoint_wandb(save_path, self.nSub)
         self.model.eval()
 
         with torch.no_grad():

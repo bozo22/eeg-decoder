@@ -270,7 +270,7 @@ def get_test_dataloader(eeg_data_path, img_data_path, dnn, subject_id):
     test_dataset = torch.utils.data.TensorDataset(test_eeg, test_label)
     test_loader = DataLoader(
         dataset=test_dataset,
-        batch_size=400,  # Fixed test batch size as in original code
+        batch_size=TEST_VAL_BATCH_SIZE,  # Fixed test batch size as in original code
         shuffle=False,
     )
 

@@ -31,21 +31,25 @@ def load_model(model, chekpoint_path, run_name, subject_id, device=None):
     return model, save_path
 
 
-def save_checkpoint_wandb(chekpoint_path, subject_id, best_val_top1):
+def new_best_epoch(val_split_per_condition, best_val_loss, best_val_top1, val_loss, val_top1):
+    return val_split_per_condition and val_top1 > best_val_top1 \
+        or not val_split_per_condition and val_loss < best_val_loss
+
+
+def save_checkpoint_wandb(chekpoint_path, subject_id):
     # create an Artifact object
     artifact = wandb.Artifact(
-        name=f"BestModel_sub{subject_id}",          # base name in the Artifacts tab
-        type="checkpoint",     # arbitrary tag; “model”, “ckpt”, etc. all work
+        name=f"BestModel_sub{subject_id}",
+        type="checkpoint",
         description="Best val-top1 checkpoint",
-        metadata={             # anything you’d like to remember
-            "val_top1": float(best_val_top1),
-            "subject_id": subject_id,
+        metadata={
+            "subject_id": subject_id
         },
     )
     # attach the file(s)
-    artifact.add_file(chekpoint_path)          # path can be relative or absolute
+    artifact.add_file(chekpoint_path)
     # log it to the run
-    wandb.run.log_artifact(artifact, aliases=["best"])   # “best” = human-friendly pointer
+    wandb.run.log_artifact(artifact, aliases=["best"])
     print(f"Checkpoint saved to wandb")
 
 def wandb_login(disable_wandb: bool):
