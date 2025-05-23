@@ -6,6 +6,21 @@ from models.submodules import ResidualAdd, EEG_GAT, channel_attention, FlattenHe
 
 
 # ===== EEG Encoder =====
+class EEG_Denoiser(nn.Module):
+    def __init__(self, dim=250, n_channels=63, n_aggregations=9, mlp_ratio=4):
+        super().__init__()
+        self.denoiser = nn.Sequential(
+            Rearrange("b a c s -> b c (a s)"),
+            nn.Linear(dim * n_aggregations, dim * mlp_ratio),
+            nn.ELU(),
+            nn.Linear(dim * mlp_ratio, dim),
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.denoiser(x).unsqueeze(1)
+        return x
+
+
 class Enc_eeg(nn.Sequential):
     def __init__(self, emb_size=40, depth=3, n_classes=4, config="GA", **kwargs):
         super().__init__(

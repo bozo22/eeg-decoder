@@ -9,11 +9,39 @@ import logging as l
 from torch.utils.data import DataLoader
 
 
-VALIDATION_NR_CONDITIONS = 200 # Same as for test set
+VALIDATION_NR_CONDITIONS = 200  # Same as for test set
 SAMPLES_PER_CONDITION = 10
 TEST_VAL_BATCH_SIZE = 200
 
-def get_eeg_data(dir_path, data_mode=None):
+
+def calculate_aggregations(data, eeg_denoiser=False):
+    """
+    Calculate various aggregations for the EEG data.
+    Args:
+        data (numpy.ndarray): EEG data of shape (num_samples, num_channels, num_timepoints)
+        eeg_denoiser (bool): Whether EEG denoiser is used - if False, only mean is calculated. Default is False.
+    Returns:
+        numpy.ndarray: Aggregated EEG data
+    """
+
+    batch, _, channels, timepoints = data.shape
+    n_aggr = 9 if eeg_denoiser else 1
+    aggregations = np.empty((batch, n_aggr, channels, timepoints), dtype=data.dtype)
+    aggregations[:, 0] = np.mean(data, axis=1)
+    if eeg_denoiser:
+        aggregations[:, 1] = np.std(data, axis=1)
+        aggregations[:, 2] = np.min(data, axis=1)
+        aggregations[:, 3] = np.max(data, axis=1)
+        aggregations[:, 4] = np.median(data, axis=1)
+        aggregations[:, 5] = np.percentile(data, 5, axis=1)
+        aggregations[:, 6] = np.percentile(data, 95, axis=1)
+        aggregations[:, 7] = np.percentile(data, 10, axis=1)
+        aggregations[:, 8] = np.percentile(data, 90, axis=1)
+
+    return aggregations
+
+
+def get_eeg_data(dir_path, data_mode=None, eeg_denoiser=False):
     train_data = []
     test_data = []
     test_label = np.arange(200)
@@ -22,28 +50,22 @@ def get_eeg_data(dir_path, data_mode=None):
         os.path.join(dir_path, "preprocessed_eeg_training.npy"), allow_pickle=True
     )
     train_data = train_data["preprocessed_eeg_data"]
-    # Average across repetitions
-    train_data = np.mean(
-        train_data, axis=1
-    )  # Shape: (total_nr_train_imgs x 1 x channels x 250)
-    train_data = np.expand_dims(train_data, axis=1)
 
     if data_mode == "debug":
         print(">>> Using EEG features for 100 training samples only")
         train_data = train_data[:100]
     elif data_mode == "small":
         print(">>> Using EEG features for 25 percent of the training samples")
-        train_data = train_data[:int(len(train_data) * 0.25)]
+        train_data = train_data[: int(len(train_data) * 0.25)]
+
+    # Calculate the aggregations
+    train_data = calculate_aggregations(train_data, eeg_denoiser)
 
     test_data = np.load(
         os.path.join(dir_path, "preprocessed_eeg_test.npy"), allow_pickle=True
     )
     test_data = test_data["preprocessed_eeg_data"]
-    # Average across repetitions
-    test_data = np.mean(
-        test_data, axis=1
-    )  # Shape: (total_nr_test_imgs x 1 x channels x 250)
-    test_data = np.expand_dims(test_data, axis=1)
+    test_data = calculate_aggregations(test_data, eeg_denoiser)
 
     return train_data, test_data, test_label
 
@@ -64,22 +86,28 @@ def get_image_data(img_data_path, dnn):
 
 def split_train_val(eeg_data, img_data, per_condition=False, split_ratio=0.05):
     """
-    Split data into train/val sets. 
+    Split data into train/val sets.
     Args:
-        per_condition: bool - 
-            If True, split by conditions, keeping all samples of each condition together. 
+        per_condition: bool -
+            If True, split by conditions, keeping all samples of each condition together.
             If False, split by indices, mixing samples from all conditions.
         split_ratio: float - ratio of data to use for validation if per_condition is False
     """
     # Align in case of runs with smaller nr of EEG samples
-    img_data = img_data[:len(eeg_data)]
+    img_data = img_data[: len(eeg_data)]
     total_samples = len(eeg_data)
     # Split by conditions
     if per_condition:
         # Randomly select conditions for validation
         nr_conditions = total_samples // SAMPLES_PER_CONDITION
-        val_nr_conditions = VALIDATION_NR_CONDITIONS if VALIDATION_NR_CONDITIONS < nr_conditions else nr_conditions // 4
-        val_conditions = np.random.choice(nr_conditions, val_nr_conditions, replace=False)
+        val_nr_conditions = (
+            VALIDATION_NR_CONDITIONS
+            if VALIDATION_NR_CONDITIONS < nr_conditions
+            else nr_conditions // 4
+        )
+        val_conditions = np.random.choice(
+            nr_conditions, val_nr_conditions, replace=False
+        )
         # Create mask for validation
         val_eeg, val_proto = [], []
         val_mask = np.zeros(total_samples, dtype=bool)
@@ -87,23 +115,25 @@ def split_train_val(eeg_data, img_data, per_condition=False, split_ratio=0.05):
         for condId in val_conditions:
             # all 10 indices belonging to this condition
             idx_start = condId * SAMPLES_PER_CONDITION
-            cond_idx  = np.arange(idx_start, idx_start + SAMPLES_PER_CONDITION)
+            cond_idx = np.arange(idx_start, idx_start + SAMPLES_PER_CONDITION)
 
             # pick ONE held-out exemplar for the EEG query
-            held_idx  = np.random.choice(cond_idx)
+            held_idx = np.random.choice(cond_idx)
             val_eeg.append(eeg_data[held_idx])
 
             # prototype = mean of the remaining 9 image embeddings
             other_idx = cond_idx[cond_idx != held_idx]
             proto_emb = img_data[other_idx].mean(axis=0)
             val_proto.append(proto_emb)
-            val_mask[cond_idx] = True      # exclude all 10 from training
-        
+            val_mask[cond_idx] = True  # exclude all 10 from training
+
         val_eeg = np.stack(val_eeg)
         val_img = np.stack(val_proto)
-        print(f"""Split train/val per condition: {nr_conditions - val_nr_conditions} training conditions 
-              and {val_nr_conditions} validation conditions""")
-    
+        print(
+            f"""Split train/val per condition: {nr_conditions - val_nr_conditions} training conditions 
+              and {val_nr_conditions} validation conditions"""
+        )
+
     # Split by indices
     else:
         # Shuffle the data
@@ -117,11 +147,13 @@ def split_train_val(eeg_data, img_data, per_condition=False, split_ratio=0.05):
         val_mask[:val_size] = True
         val_eeg = eeg_data[val_mask]
         val_img = img_data[val_mask]
-        print(f"Split train/val by split ratio: {total_samples - val_size} training samples and {val_size} validation samples")
+        print(
+            f"Split train/val by split ratio: {total_samples - val_size} training samples and {val_size} validation samples"
+        )
 
     val_eeg = torch.from_numpy(val_eeg).type(torch.FloatTensor)
     val_image = torch.from_numpy(val_img).type(torch.FloatTensor)
-    
+
     train_eeg = torch.from_numpy(eeg_data[~val_mask]).type(torch.FloatTensor)
     train_image = torch.from_numpy(img_data[~val_mask]).type(torch.FloatTensor)
     return train_eeg, train_image, val_eeg, val_image
@@ -146,15 +178,16 @@ def mixup(mixup_alpha, eeg, img_features, device):
 
 
 def get_dataloaders(
-    base_eeg_data_path, 
+    base_eeg_data_path,
     image_data_path,
-    dnn, 
-    subject_id, 
-    batch_size, 
-    mixup_in_class=False, 
-    use_mixup=False, 
+    dnn,
+    subject_id,
+    batch_size,
+    mixup_in_class=False,
+    use_mixup=False,
     mixup_val_set_size=740,
     n_ways=[2, 5, 10],
+    eeg_denoiser=False,
     dataset_mode=None,
     val_set_per_condition=False,
 ):
@@ -167,8 +200,9 @@ def get_dataloaders(
         subject_id (int): Subject ID (1-based)
         batch_size (int): Batch size
         n_ways (list): List of n-way classification test datasets (in addition to the full 200-way test set)
+        eeg_denoiser (bool): Whether to use EEG denoiser
         dataset_mode (str): Dataset mode (None, "small", "debug") - how much data to use
-        val_set_per_condition (bool): If True, split by conditions, keeping all samples of each condition together. 
+        val_set_per_condition (bool): If True, split by conditions, keeping all samples of each condition together.
             If False, split by indices, mixing samples from all conditions.
     Returns:
         tuple: (train_loader, val_loader, test_loader, test_centers, test_n_way_loaders, test_n_way_centers)
@@ -177,7 +211,9 @@ def get_dataloaders(
 
     # Get the data
     eeg_data_path = os.path.join(base_eeg_data_path, "sub-" + format(subject_id, "02"))
-    train_eeg, test_eeg, test_label = get_eeg_data(eeg_data_path, data_mode=dataset_mode)
+    train_eeg, test_eeg, test_label = get_eeg_data(
+        eeg_data_path, data_mode=dataset_mode, eeg_denoiser=eeg_denoiser
+    )
     train_img_feature, test_centers = get_image_data(image_data_path, dnn)
     # Convert test data to tensors
     test_eeg = torch.from_numpy(test_eeg).type(torch.FloatTensor)
@@ -193,12 +229,22 @@ def get_dataloaders(
 
     # Split train/val
     if mixup_in_class or use_mixup:
-        val_eeg = torch.from_numpy(train_eeg[:mixup_val_set_size]).type(torch.FloatTensor)
-        val_image = torch.from_numpy(train_img_feature[:mixup_val_set_size]).type(torch.FloatTensor)    
-        train_eeg = torch.from_numpy(train_eeg[mixup_val_set_size:]).type(torch.FloatTensor)
-        train_image = torch.from_numpy(train_img_feature[mixup_val_set_size:]).type(torch.FloatTensor)       
+        val_eeg = torch.from_numpy(train_eeg[:mixup_val_set_size]).type(
+            torch.FloatTensor
+        )
+        val_image = torch.from_numpy(train_img_feature[:mixup_val_set_size]).type(
+            torch.FloatTensor
+        )
+        train_eeg = torch.from_numpy(train_eeg[mixup_val_set_size:]).type(
+            torch.FloatTensor
+        )
+        train_image = torch.from_numpy(train_img_feature[mixup_val_set_size:]).type(
+            torch.FloatTensor
+        )
     else:
-        train_eeg, train_image, val_eeg, val_image = split_train_val(train_eeg, train_img_feature, per_condition=val_set_per_condition)
+        train_eeg, train_image, val_eeg, val_image = split_train_val(
+            train_eeg, train_img_feature, per_condition=val_set_per_condition
+        )
 
     # Create datasets
     train_dataset = torch.utils.data.TensorDataset(train_eeg, train_image)
@@ -215,7 +261,9 @@ def get_dataloaders(
     train_loader = DataLoader(
         dataset=train_dataset, batch_size=batch_size, shuffle=True
     )
-    val_loader = DataLoader(dataset=val_dataset, batch_size=TEST_VAL_BATCH_SIZE, shuffle=False)
+    val_loader = DataLoader(
+        dataset=val_dataset, batch_size=TEST_VAL_BATCH_SIZE, shuffle=False
+    )
     test_loader = DataLoader(
         dataset=test_dataset,
         batch_size=TEST_VAL_BATCH_SIZE,  # Fixed test batch size as in original code
