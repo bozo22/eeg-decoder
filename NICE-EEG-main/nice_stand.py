@@ -103,6 +103,7 @@ parser.add_argument(
 
 # Experiment parameters
 parser.add_argument("--lr", default=0.0002, type=float, help="Learning rate.")
+parser.add_argument("--weight_decay", default=1e-4, type=float, help="Weight decay.")
 parser.add_argument(
     "--proj_dim",
     default=768,
@@ -133,13 +134,13 @@ parser.add_argument(
 # MultiScaleTemporalConvBlock parameters
 parser.add_argument(
     "--mstc_out_channels",
-    default=42,
+    default=60,
     type=int,
     help="Number of output channels for MultiScaleTemporalConvBlock"
 )
 parser.add_argument(
     "--mstc_kernel_sizes",
-    default="3,11,25",
+    default="3,15,25",
     type=str,
     help="Comma-separated list of kernel sizes for MultiScaleTemporalConvBlock"
 )
@@ -151,25 +152,25 @@ parser.add_argument(
 )
 parser.add_argument(
     "--mstc_pool_kernel_size",
-    default="1,30",
+    default="1,35",
     type=str,
     help="Comma-separated tuple of kernel size for pooling in MultiScaleTemporalConvBlock"
 )
 parser.add_argument(
     "--mstc_pool_stride",
-    default="1,3",
+    default="1,5",
     type=str,
     help="Comma-separated tuple of stride for pooling in MultiScaleTemporalConvBlock"
 )
 parser.add_argument(
     "--mstc_dropout_p",
-    default=0.25,
+    default=0.15,
     type=float,
     help="Dropout probability for MultiScaleTemporalConvBlock"
 )
 parser.add_argument(
     "--pe_dropout_p",
-    default=0.25,
+    default=0.3,
     type=float,
     help="Dropout probability for EEG patch encoder"
 )
@@ -268,7 +269,7 @@ class IE:
         self.lr = args.lr
         self.b1 = 0.5
         self.b2 = 0.999
-        self.weight_decay = 1e-4
+        self.weight_decay = args.weight_decay
 
         self.start_epoch = 0
         self.eeg_data_path = os.path.join(args.dataset_path, "Preprocessed_data_250Hz")
@@ -321,7 +322,7 @@ class IE:
             self.optimizer,
             max_lr    = self.lr,            # same base
             div_factor= 25,              # start lr = max_lr/25
-            final_div_factor=250,        # end lr = max_lr/250
+            final_div_factor=1000,        # end lr = max_lr/1000
             pct_start = 0.3,             # up-ramp for 30 % of training
             total_steps = len(train_loader) * self.n_epochs,
 )
