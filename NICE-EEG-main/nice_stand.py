@@ -335,7 +335,8 @@ class IE:
             (2, self.n_epochs, 4)
         )
         epochs_no_gain   = 0
-        patience         = 10             # stop if no gain for 10 epochs
+        patience         = 10             # stop if no gain for 10 epochs after epoch_patience
+        epoch_patience   = self.n_epochs // 3
 
         for e in range(self.n_epochs):
             epoch_losses = []
@@ -476,7 +477,7 @@ class IE:
                         save_model(
                             self.model, model_checkpoint_path, run_name, self.nSub, checkpoint_uuid
                         )
-                    else:
+                    elif e >= epoch_patience:
                         epochs_no_gain += 1
 
                 print(
@@ -492,7 +493,7 @@ class IE:
 
             # Early stopping
             if epochs_no_gain >= patience:
-                print(f">>> No gain for {patience} epochs, stop training")
+                print(f">>> No gain for {patience} epochs after epoch {epoch_patience}, stop training")
                 break
 
         # ===== Test =====
