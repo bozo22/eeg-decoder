@@ -15,8 +15,11 @@ class SuperNICE(nn.Module):
         self.proj_dim = args.proj_dim
         self.eeg_proj_do = 0.5
         self.img_proj_do = 0.3
+        self.use_eeg_denoiser = args.use_eeg_denoiser
 
-        self.EEG_Denoiser = EEG_Denoiser()
+        self.EEG_Denoiser = nn.Identity()
+        if self.use_eeg_denoiser:
+            self.EEG_Denoiser = EEG_Denoiser()
         self.Enc_eeg = Enc_eeg(config=args.config)
         self.Proj_eeg = Proj_eeg(
             input_dim=self.eeg_projector_input_dim,

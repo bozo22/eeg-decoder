@@ -100,6 +100,20 @@ parser.add_argument(
                     """,
 )
 parser.add_argument(
+    "--use_eeg_denoiser",
+    action="store_true",
+    help="""
+                    If true, will use the eeg denoiser, otherwise will skip it.
+                    """,
+)
+parser.add_argument(
+    "--saliency",
+    action="store_true",
+    help="""
+                    If true, will calculate the saliency maps, otherwise will skip it.
+                    """,
+)
+parser.add_argument(
     "--config",
     default="GASA",
     type=str,
@@ -166,6 +180,7 @@ class IE:
         self.batch_size_img = 500
         self.n_epochs = args.epoch
         self.n_ways = n_ways
+        self.saliency = args.saliency
 
         # Optimizer parameters
         self.lr = args.lr
@@ -214,6 +229,7 @@ class IE:
             self.batch_size,
             debug=args.debug,
             n_ways=self.n_ways,
+            eeg_denoiser=self.args.use_eeg_denoiser,
         )
 
         # Optimizers
@@ -363,17 +379,32 @@ class IE:
         save_checkpoint_wandb(save_path, self.nSub, best_loss_val)
         self.model.eval()
 
-        with torch.no_grad():
+        saliencies = []
+
+        with torch.set_grad_enabled(self.saliency):
             for teeg, tlabel in tqdm(test_loader):
                 teeg = teeg.to(device)
                 tlabel = tlabel.to(device)
                 timg = test_centers.to(device)
+
+                if self.saliency:
+                    teeg.requires_grad = True
 
                 # Feed through the model
                 tfea, timg = self.model(teeg, timg)
 
                 similarity = (tfea @ timg.t()).softmax(dim=-1)
                 _, indices = similarity.topk(5)
+                scores, _ = similarity.max(dim=-1)
+
+                if self.saliency:
+                    # Calculate saliency maps
+                    scores.sum().backward()
+                    saliency_map = teeg.grad.data
+                    saliencies.append(
+                        saliency_map.abs().mean(dim=-1).mean(dim=-1).cpu().numpy()
+                    )
+                    teeg.grad.data.zero_()
 
                 tt_label = tlabel.view(-1, 1)
                 total += tlabel.size(0)
@@ -408,6 +439,8 @@ class IE:
                 for i in range(len(n_way_top1))
             ]
 
+        saliencies = np.concat(saliencies, axis=0).mean(axis=0)
+
         print(
             f">> Subject {self.nSub} - The test Top1-%.6f, Top3-%.6f, Top5-%.6f"
             % (top1_acc, top3_acc, top5_acc)
@@ -416,11 +449,14 @@ class IE:
         for i, n_way in enumerate(self.n_ways):
             print(f"  {n_way}-way: {n_way_top1_acc[i]:.6f}")
 
-        return top1_acc, top3_acc, top5_acc, train_results, n_way_top1_acc
+        return top1_acc, top3_acc, top5_acc, train_results, n_way_top1_acc, saliencies
         # writer.close()
 
 
 def main():
+    assert (
+        args.use_eeg_denoiser or not args.saliency
+    ), "Saliency maps can only be calculated if EEG denoiser is used."
     num_sub = args.num_sub
     n_ways = [2, 5, 10]
     cal_num = 0
@@ -429,6 +465,7 @@ def main():
     aver3 = []
     aver5 = []
     avern = []
+    all_saliencies = []
 
     for i in range(num_sub):
 
@@ -439,7 +476,7 @@ def main():
         print("Subject %d" % (i + 1))
         ie = IE(args, n_ways, i + 1)
 
-        Acc, Acc3, Acc5, train_results, n_way_top1_acc = ie.train()
+        Acc, Acc3, Acc5, train_results, n_way_top1_acc, saliencies = ie.train()
         print("THE BEST ACCURACY IS " + str(Acc))
 
         endtime = time.time()
@@ -449,6 +486,7 @@ def main():
         aver3.append(Acc3)
         aver5.append(Acc5)
         avern.append(n_way_top1_acc)
+        all_saliencies.append(saliencies)
 
         avg_train_results.append(train_results)
 
@@ -480,6 +518,13 @@ def main():
         wandb.run.summary[f"{subj}/top5"] = aver5[i]
         for j in range(len(avern[i])):
             wandb.run.summary[f"{subj}/{n_ways[j]}-way"] = avern[i][j]
+
+    # Log saliency maps
+    all_saliencies = np.array(all_saliencies)
+    saliency_mean = np.mean(all_saliencies, axis=0)
+    saliency_std = np.std(all_saliencies, axis=0)
+    wandb.run.summary[f"saliency_mean"] = saliency_mean
+    wandb.run.summary[f"saliency_std"] = saliency_std
 
     column = np.arange(1, cal_num + 1).tolist()
     column.append("ave")

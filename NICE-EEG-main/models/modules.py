@@ -7,7 +7,7 @@ from models.submodules import ResidualAdd, EEG_GAT, channel_attention, FlattenHe
 
 # ===== EEG Encoder =====
 class EEG_Denoiser(nn.Module):
-    def __init__(self, dim=250, n_channels=63, n_aggregations=5, mlp_ratio=4):
+    def __init__(self, dim=250, n_channels=63, n_aggregations=9, mlp_ratio=4):
         super().__init__()
         self.denoiser = nn.Sequential(
             Rearrange("b a c s -> b c (a s)"),

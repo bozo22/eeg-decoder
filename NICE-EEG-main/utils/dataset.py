@@ -9,29 +9,34 @@ import logging as l
 from torch.utils.data import DataLoader
 
 
-def calculate_aggregations(data):
+def calculate_aggregations(data, eeg_denoiser=False):
     """
     Calculate various aggregations for the EEG data.
     Args:
         data (numpy.ndarray): EEG data of shape (num_samples, num_channels, num_timepoints)
+        eeg_denoiser (bool): Whether EEG denoiser is used - if False, only mean is calculated. Default is False.
     Returns:
         numpy.ndarray: Aggregated EEG data
     """
 
-    # replace this code to make it as memory efficient as possible
     batch, _, channels, timepoints = data.shape
-    aggregations = np.empty((batch, 5, channels, timepoints), dtype=data.dtype)
-    print("Calculating EEG aggregations...")
+    n_aggr = 9 if eeg_denoiser else 1
+    aggregations = np.empty((batch, n_aggr, channels, timepoints), dtype=data.dtype)
     aggregations[:, 0] = np.mean(data, axis=1)
-    aggregations[:, 1] = np.std(data, axis=1)
-    aggregations[:, 2] = np.max(data, axis=1)
-    aggregations[:, 3] = np.min(data, axis=1)
-    aggregations[:, 4] = np.median(data, axis=1)
+    if eeg_denoiser:
+        aggregations[:, 1] = np.std(data, axis=1)
+        aggregations[:, 2] = np.min(data, axis=1)
+        aggregations[:, 3] = np.max(data, axis=1)
+        aggregations[:, 4] = np.median(data, axis=1)
+        aggregations[:, 5] = np.percentile(data, 5, axis=1)
+        aggregations[:, 6] = np.percentile(data, 95, axis=1)
+        aggregations[:, 7] = np.percentile(data, 10, axis=1)
+        aggregations[:, 8] = np.percentile(data, 90, axis=1)
 
     return aggregations
 
 
-def get_eeg_data(dir_path, use_debug_eeg=False):
+def get_eeg_data(dir_path, use_debug_eeg=False, eeg_denoiser=False):
     train_data = []
     test_data = []
     test_label = np.arange(200)
@@ -41,18 +46,18 @@ def get_eeg_data(dir_path, use_debug_eeg=False):
     )
     train_data = train_data["preprocessed_eeg_data"]
 
-    # Calculate the aggregations
-    train_data = calculate_aggregations(train_data)
-
     if use_debug_eeg:
         l.debug("Using EEG features for 100 training images only")
         train_data = train_data[:100]
+
+    # Calculate the aggregations
+    train_data = calculate_aggregations(train_data, eeg_denoiser)
 
     test_data = np.load(
         os.path.join(dir_path, "preprocessed_eeg_test.npy"), allow_pickle=True
     )
     test_data = test_data["preprocessed_eeg_data"]
-    test_data = calculate_aggregations(test_data)
+    test_data = calculate_aggregations(test_data, eeg_denoiser)
 
     return train_data, test_data, test_label
 
@@ -96,6 +101,7 @@ def get_dataloaders(
     batch_size,
     debug=False,
     n_ways=[2, 5, 10],
+    eeg_denoiser=False,
 ):
     """
     Create and return dataloaders for training, validation, and testing.
@@ -107,13 +113,16 @@ def get_dataloaders(
         batch_size (int): Batch size
         debug (bool): Whether to use only a subset of the data in training for debugging
         n_ways (list): List of n-way classification test datasets (in addition to the full 200-way test set)
+        eeg_denoiser (bool): Whether to use EEG denoiser
     Returns:
         tuple: (train_loader, val_loader, test_loader, test_centers, test_n_way_loaders, test_n_way_centers)
     """
     print("Start loading data...")
     # Get the data
     eeg_data_path = os.path.join(base_eeg_data_path, "sub-" + format(subject_id, "02"))
-    train_eeg, test_eeg, test_label = get_eeg_data(eeg_data_path, use_debug_eeg=debug)
+    train_eeg, test_eeg, test_label = get_eeg_data(
+        eeg_data_path, use_debug_eeg=debug, eeg_denoiser=eeg_denoiser
+    )
     train_img_feature, test_centers = get_image_data(image_data_path, dnn)
     test_n_way_eeg, test_n_way_label = [], []
 
