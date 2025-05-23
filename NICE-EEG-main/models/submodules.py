@@ -16,7 +16,7 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 
 
-NUM_CHANNELS = 63
+NUM_ELECTRODES = 63
 
 class channel_attention(nn.Module):
     def __init__(self, sequence_num=250, inter=30):

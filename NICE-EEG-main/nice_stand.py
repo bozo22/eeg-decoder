@@ -102,7 +102,7 @@ parser.add_argument(
 )
 
 # Experiment parameters
-parser.add_argument("--lr", default=0.0002, type=float, help="Learning rate.")
+parser.add_argument("--lr", default=0.0009, type=float, help="Learning rate.")
 parser.add_argument("--weight_decay", default=1e-4, type=float, help="Weight decay.")
 parser.add_argument(
     "--proj_dim",

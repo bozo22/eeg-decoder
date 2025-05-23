@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch as th
 from torch import Tensor
 from einops.layers.torch import Rearrange
-from models.submodules import Debugger, MultiScaleTemporalConvBlock, ResidualAdd, EEG_GAT, SqueezeExcite, channel_attention, FlattenHead, NUM_CHANNELS
+from models.submodules import Debugger, MultiScaleTemporalConvBlock, ResidualAdd, EEG_GAT, SqueezeExcite, channel_attention, FlattenHead, NUM_ELECTRODES
 
 # ===== EEG Encoder =====
 class Enc_eeg(nn.Sequential):
@@ -77,6 +77,7 @@ class PatchEmbedding(nn.Module):
             )
         elif type == "multiscale_1block":
             final_channels = kwargs['mstc_out_channels']
+            second_temporal_conv_kernel_size = 5
             self.patch_encoder = nn.Sequential(
                 MultiScaleTemporalConvBlock(
                     in_ch=1,
@@ -89,6 +90,21 @@ class PatchEmbedding(nn.Module):
                     ),
                     dropout_p=kwargs['mstc_dropout_p'],
                 ),
+
+                # Spatial electrode-level SE & mixing across electrodes
+                Rearrange("b c h w -> b h c w"),
+                SqueezeExcite(NUM_ELECTRODES),
+                nn.Conv2d(NUM_ELECTRODES, NUM_ELECTRODES, 1, bias=False),
+                nn.BatchNorm2d(NUM_ELECTRODES),
+                nn.ELU(inplace=True),
+                Rearrange("b h c w -> b c h w"),
+
+                # Another temporal convolution
+                nn.Conv2d(final_channels, final_channels, (1, second_temporal_conv_kernel_size), (1, 1), padding=(0, (second_temporal_conv_kernel_size - 1) // 2)),
+                nn.BatchNorm2d(final_channels),
+                nn.ELU(),
+
+                # Aggregation across electrodes
                 nn.Conv2d(final_channels, final_channels, (63, 1), (1, 1)),
                 nn.BatchNorm2d(final_channels),
                 nn.ELU(),
@@ -113,9 +129,9 @@ class PatchEmbedding(nn.Module):
 
                 # Spatial electrode-level SE & mixing across electrodes
                 Rearrange("b c h w -> b h c w"),
-                SqueezeExcite(NUM_CHANNELS),
-                nn.Conv2d(NUM_CHANNELS, NUM_CHANNELS, 1, bias=False),
-                nn.BatchNorm2d(NUM_CHANNELS),
+                SqueezeExcite(NUM_ELECTRODES),
+                nn.Conv2d(NUM_ELECTRODES, NUM_ELECTRODES, 1, bias=False),
+                nn.BatchNorm2d(NUM_ELECTRODES),
                 nn.ELU(inplace=True),
                 Rearrange("b h c w -> b c h w"),
 
