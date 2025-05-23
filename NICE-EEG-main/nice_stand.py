@@ -47,7 +47,7 @@ parser = argparse.ArgumentParser(
 # Architectures
 parser.add_argument("--dnn", default="clip", type=str)
 # Training parameters
-parser.add_argument("--epoch", default="200", type=int)
+parser.add_argument("--epoch", default="150", type=int)
 parser.add_argument(
     "--num_sub",
     default=10,
@@ -103,7 +103,7 @@ parser.add_argument(
 
 # Experiment parameters
 parser.add_argument("--lr", default=0.0009, type=float, help="Learning rate.")
-parser.add_argument("--weight_decay", default=1e-4, type=float, help="Weight decay.")
+parser.add_argument("--weight_decay", default=3e-4, type=float, help="Weight decay.")
 parser.add_argument(
     "--proj_dim",
     default=768,
@@ -164,7 +164,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--mstc_dropout_p",
-    default=0.15,
+    default=0.2,
     type=float,
     help="Dropout probability for MultiScaleTemporalConvBlock"
 )
@@ -322,7 +322,7 @@ class IE:
             self.optimizer,
             max_lr    = self.lr,            # same base
             div_factor= 25,              # start lr = max_lr/25
-            final_div_factor=1000,        # end lr = max_lr/1000
+            final_div_factor=250,        # end lr = max_lr/250
             pct_start = 0.3,             # up-ramp for 30 % of training
             total_steps = len(train_loader) * self.n_epochs,
 )
