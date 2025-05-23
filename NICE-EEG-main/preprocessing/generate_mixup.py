@@ -52,18 +52,18 @@ def mixup_images(img_folder, img_output_folder, lams, index, perm_index):
             images.append(img)
 
     images = np.array(images)
-    # permutate the images
+    # permute the images
     images = images[index]
     num_images = len(images)
+    name_width = len(str(num_images))
 
-    # Save original images in the permutated order
+    # Save original images in the permuted order
     for num_img, img in zip(range(num_images), images):
-        cv2.imwrite(os.path.join(img_output_folder, f'image_num_{num_img}.jpg'), img)
+        cv2.imwrite(os.path.join(img_output_folder, f'image_num_{num_img:0{name_width}d}.jpg'), img)
 
     print("Shape of images before mixup: ", images.shape)
-
     image_batches = get_batches(images)
-    images = []
+    del images
     lam_batches = get_batches(lams)
 
     # mixup the images in batches so it fits in the GPU memory
@@ -71,7 +71,7 @@ def mixup_images(img_folder, img_output_folder, lams, index, perm_index):
         mixup_batch = mixup_data(batch, lam_batches[i], perm_index[i], use_cuda=True)
         mixup_batch = mixup_batch.to('cpu').numpy()
         for img in mixup_batch:
-            cv2.imwrite(os.path.join(img_output_folder, f'image_num_{num_images}.jpg'), img)
+            cv2.imwrite(os.path.join(img_output_folder, f'image_num_{num_images:0{name_width}d}.jpg'), img)
             num_images += 1
 
     print("Number of images after mixup: ", num_images)
@@ -86,13 +86,15 @@ def mixup_eeg(eeg_folder, eeg_output_folder, lams, index, perm_index):
                 os.makedirs(os.path.join(eeg_output_folder, sub_folder), exist_ok=True)
                 eeg_data = np.load(os.path.join(eeg_folder, sub_folder, file), allow_pickle=True)
                 eeg = eeg_data['preprocessed_eeg_data']
-                # permutate the EEG data
+                # permute the EEG data
                 eeg = eeg[index]
 
                 print("Shape of EEG data before mixup: ", eeg.shape)
+                eeg_data['preprocessed_eeg_data'] = eeg
+                np.save(os.path.join(eeg_output_folder, sub_folder, file), eeg_data)
                 eeg_batches = get_batches(eeg)
                 lam_batches = get_batches(lams)
-                # make a list to store the mixup data, the first element is the permutated eeg data
+                # make a list to store the mixup data, the first element is the permuted eeg data
                 eeg = [eeg]
 
                 # mixup the EEG data in batches so it fits in the GPU memory
@@ -104,11 +106,14 @@ def mixup_eeg(eeg_folder, eeg_output_folder, lams, index, perm_index):
                 eeg_data['preprocessed_eeg_data'] = np.concatenate(eeg, axis=0)
                 np.save(os.path.join(eeg_output_folder, sub_folder, file), eeg_data)
                 print("Shape of EEG data after mixup: ", eeg_data['preprocessed_eeg_data'].shape)
+                del eeg
 
             if "preprocessed_eeg_test.npy" in file:
                 os.makedirs(os.path.join(eeg_output_folder, sub_folder), exist_ok=True)
                 eeg_data = np.load(os.path.join(eeg_folder, sub_folder, file), allow_pickle=True)
                 np.save(os.path.join(eeg_output_folder, sub_folder, file), eeg_data)
+
+            del eeg_data
 
 
 def load_data_from_folder(img_folder, eeg_folder, num_cls, img_per_cls, img_output_folder, eeg_output_folder, alpha=0.4):
