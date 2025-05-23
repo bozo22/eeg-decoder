@@ -318,14 +318,14 @@ class IE:
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2), weight_decay=self.weight_decay
         )
-        self.scheduler = OneCycleLR(
-            self.optimizer,
-            max_lr    = self.lr,            # same base
-            div_factor= 25,              # start lr = max_lr/25
-            final_div_factor=250,        # end lr = max_lr/250
-            pct_start = 0.3,             # up-ramp for 30 % of training
-            total_steps = len(train_loader) * self.n_epochs,
-)
+#         self.scheduler = OneCycleLR(
+#             self.optimizer,
+#             max_lr    = self.lr,            # same base
+#             div_factor= 25,              # start lr = max_lr/25
+#             final_div_factor=250,        # end lr = max_lr/250
+#             pct_start = 0.3,             # up-ramp for 30 % of training
+#             total_steps = len(train_loader) * self.n_epochs,
+# )
 
         # Metrics
         best_val_top1 = 0
@@ -388,7 +388,7 @@ class IE:
                 loss.backward()
                 self.optimizer.step()
             
-                self.scheduler.step()
+                # self.scheduler.step()
             # Log epoch metrics
             avg_epoch_loss = sum(epoch_losses) / len(epoch_losses)
             avg_epoch_loss_eeg = sum(epoch_losses_eeg) / len(epoch_losses_eeg)
