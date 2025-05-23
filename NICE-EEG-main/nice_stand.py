@@ -80,8 +80,8 @@ parser.add_argument(
     "--mode",
     default=None,
     type=str,
-    choices=["debug", "small_run"],
-    help="If `debug`, will run in debug mode with only 100 samples per subject. If `small_run`, will use only  25% of the dataset.",
+    choices=["debug", "small_run", "no_patience"],
+    help="If `debug`, will run in debug mode with only 100 samples per subject. If `small_run`, will use only  25% of the dataset. If `no_patience`, will not use early stopping.",
 )
 parser.add_argument("--split_val_set_per_condition", action="store_true", help="Get the val set by splitting by conditions, keeping all samples for each condition together.")
 parser.add_argument("--mixup", action="store_true", help="Use mixup data augmentation")
@@ -340,7 +340,7 @@ class IE:
         )
         epochs_no_gain   = 0
         patience         = 10             # stop if no gain for 10 epochs after epoch_patience
-        epoch_patience   = self.n_epochs // 3
+        epoch_patience   = self.n_epochs if args.mode in ["no_patience", "small_run"] else self.n_epochs // 3
 
         for e in range(self.n_epochs):
             epoch_losses = []
