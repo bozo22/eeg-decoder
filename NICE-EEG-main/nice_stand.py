@@ -7,6 +7,7 @@ use 250 Hz data
 import os
 import argparse
 import time
+import uuid
 import numpy as np
 import pandas as pd
 from pprint import pprint
@@ -30,12 +31,14 @@ from utils.utils import (
 )
 from utils.dataset import SMALL_RUN_RATIO, get_dataloaders, mixup
 
+
 # gpus = [0]
 # os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
 # os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(map(str, gpus))
 NICE_path = os.path.dirname(os.path.abspath(__file__))
 result_path = os.path.join(NICE_path, "results")
 model_checkpoint_path = os.path.join(result_path, "checkpoints")
+checkpoint_uuid = str(uuid.uuid4())[:8]
 
 
 parser = argparse.ArgumentParser(
@@ -467,7 +470,7 @@ class IE:
                         print(f"New best epoch - {best_epoch}")
                         # Save models, handling both DataParallel and non-DataParallel cases
                         save_model(
-                            self.model, model_checkpoint_path, run_name, self.nSub
+                            self.model, model_checkpoint_path, run_name, self.nSub, checkpoint_uuid
                         )
                 print(
                     "Epoch:",
@@ -489,7 +492,7 @@ class IE:
         n_way_top1 = [0] * len(self.n_ways)
 
         self.model, save_path = load_model(
-            self.model, model_checkpoint_path, run_name, self.nSub
+            self.model, model_checkpoint_path, run_name, self.nSub, checkpoint_uuid
         )
         save_checkpoint_wandb(save_path, self.nSub)
         self.model.eval()
