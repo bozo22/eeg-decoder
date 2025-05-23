@@ -334,6 +334,8 @@ class IE:
         train_results = np.zeros(
             (2, self.n_epochs, 4)
         )
+        epochs_no_gain   = 0
+        patience         = 10             # stop if no gain for 10 epochs
 
         for e in range(self.n_epochs):
             epoch_losses = []
@@ -467,12 +469,16 @@ class IE:
                         else:
                             best_val_loss = avg_val_loss
                         best_epoch = e + 1
+                        epochs_no_gain = 0
                         os.makedirs(model_checkpoint_path, exist_ok=True)
-                        print(f"New best epoch - {best_epoch}")
+                        print(f"!!! New best epoch - {best_epoch}")
                         # Save models, handling both DataParallel and non-DataParallel cases
                         save_model(
                             self.model, model_checkpoint_path, run_name, self.nSub, checkpoint_uuid
                         )
+                    else:
+                        epochs_no_gain += 1
+
                 print(
                     "Epoch:",
                     e + 1,
@@ -483,6 +489,11 @@ class IE:
 
             endtime_epoch = time.time()
             print(f"Epoch {e + 1} took {endtime_epoch - starttime_epoch} seconds")
+
+            # Early stopping
+            if epochs_no_gain >= patience:
+                print(f">>> No gain for {patience} epochs, stop training")
+                break
 
         # ===== Test =====
         total = 0
