@@ -315,12 +315,12 @@ class IE:
         )
 
         # Optimizer & Scheduler
-        # self.optimizer = torch.optim.AdamW(
-        #     self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2), weight_decay=self.weight_decay
-        # )
-        self.optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2)
+        self.optimizer = torch.optim.AdamW(
+            self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2), weight_decay=self.weight_decay
         )
+        # self.optimizer = torch.optim.Adam(
+        #     self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2)
+        # )
 
 #         self.scheduler = OneCycleLR(
 #             self.optimizer,
