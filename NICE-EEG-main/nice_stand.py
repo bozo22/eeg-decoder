@@ -245,6 +245,8 @@ else:
     print(f">>> Skipping image projector")
     run_name = f"skipIP-" + run_name
 run_name = f"{args.eeg_patch_encoder}-" + run_name
+run_name = f"mixup({args.mixup_alpha if args.mixup else 'none'})-{run_name}"
+run_name = f"spatial({args.config})-denoiser({args.use_eeg_denoiser})-{run_name}"
 run.name = run_name
 
 # ===== Pre-run setup =====
