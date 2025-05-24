@@ -103,7 +103,7 @@ parser.add_argument(
 
 # Experiment parameters
 parser.add_argument("--lr", default=0.0009, type=float, help="Learning rate.")
-parser.add_argument("--weight_decay", default=3e-4, type=float, help="Weight decay.")
+parser.add_argument("--weight_decay", default=None, type=float, help="Weight decay.")
 parser.add_argument(
     "--proj_dim",
     default=768,
@@ -180,7 +180,6 @@ if args.mixup and args.mixup_in_class:
     raise ValueError(
         "Cannot use both mixup across classes and mixup within the same class. Please choose one."
     )
-pprint(args)
 
 # ===== WandB setup =====
 wandb_login(args.disable_wandb)
@@ -315,12 +314,14 @@ class IE:
         )
 
         # Optimizer & Scheduler
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2), weight_decay=self.weight_decay
-        )
-        # self.optimizer = torch.optim.Adam(
-        #     self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2)
-        # )
+        if self.weight_decay is not None:
+            self.optimizer = torch.optim.AdamW(
+                self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2), weight_decay=self.weight_decay
+            )
+        else:
+            self.optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2)
+            )
 
 #         self.scheduler = OneCycleLR(
 #             self.optimizer,
