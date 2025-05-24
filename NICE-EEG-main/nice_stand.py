@@ -65,6 +65,11 @@ parser.add_argument(
 parser.add_argument(
     "--dataset_path", default="Things-EEG2/", type=str, help="Path to the dataset. "
 )
+parser.add_argument(
+    "--split_val_set_per_condition",
+    action="store_true",
+    help="Get the val set by splitting by conditions, keeping all samples for each condition together.",
+)
 # Auxiliary parameters
 parser.add_argument(
     "--seed", default=2023, type=int, help="seed for initializing training. "
@@ -83,26 +88,23 @@ parser.add_argument(
     choices=["debug", "small_run", "no_patience"],
     help="If `debug`, will run in debug mode with only 100 samples per subject. If `small_run`, will use only  25% of the dataset. If `no_patience`, will not use early stopping.",
 )
-parser.add_argument(
-    "--split_val_set_per_condition",
-    action="store_true",
-    help="Get the val set by splitting by conditions, keeping all samples for each condition together.",
-)
-parser.add_argument("--mixup", action="store_true", help="Use mixup data augmentation")
-parser.add_argument(
-    "--mixup-alpha", type=float, default=0.2, help="Mixup alpha parameter"
-)
-parser.add_argument(
-    "--mixup_in_class",
-    action="store_true",
-    help="Use mixup data augmentation within the same class",
-)
 # WandB parameters
 parser.add_argument(
     "--disable_wandb", action="store_true", help="If True, will not use wandb."
 )
 parser.add_argument(
     "--run_group", default=None, type=str, help="Group name for the WandB run."
+)
+
+# Mixup parameters
+parser.add_argument("--mixup", action="store_true", help="Use mixup data augmentation")
+parser.add_argument(
+    "--mixup-alpha", type=float, default=0.3, help="Mixup alpha parameter"
+)
+parser.add_argument(
+    "--mixup_in_class",
+    action="store_true",
+    help="Use mixup data augmentation within the same class",
 )
 
 # Experiment parameters

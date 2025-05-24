@@ -229,23 +229,9 @@ def get_dataloaders(
         test_n_way_centers.append(test_centers[:n_way])
 
     # Split train/val
-    if mixup_in_class or use_mixup:
-        val_eeg = torch.from_numpy(train_eeg[:mixup_val_set_size]).type(
-            torch.FloatTensor
-        )
-        val_image = torch.from_numpy(train_img_feature[:mixup_val_set_size]).type(
-            torch.FloatTensor
-        )
-        train_eeg = torch.from_numpy(train_eeg[mixup_val_set_size:]).type(
-            torch.FloatTensor
-        )
-        train_image = torch.from_numpy(train_img_feature[mixup_val_set_size:]).type(
-            torch.FloatTensor
-        )
-    else:
-        train_eeg, train_image, val_eeg, val_image = split_train_val(
-            train_eeg, train_img_feature, per_condition=val_set_per_condition
-        )
+    train_eeg, train_image, val_eeg, val_image = split_train_val(
+        train_eeg, train_img_feature, per_condition=val_set_per_condition
+    )
 
     # Create datasets
     train_dataset = torch.utils.data.TensorDataset(train_eeg, train_image)
