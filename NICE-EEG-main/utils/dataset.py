@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 SMALL_RUN_RATIO = 0.60
 VALIDATION_NR_CONDITIONS = 200 # Same as for test set
 SAMPLES_PER_CONDITION = 10
-TEST_VAL_BATCH_SIZE = 200
+TEST_VAL_BATCH_SIZE = 1000
 
 def get_eeg_data(dir_path, data_mode=None):
     train_data = []
