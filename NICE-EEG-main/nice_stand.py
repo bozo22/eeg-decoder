@@ -83,7 +83,11 @@ parser.add_argument(
     choices=["debug", "small_run", "no_patience"],
     help="If `debug`, will run in debug mode with only 100 samples per subject. If `small_run`, will use only  25% of the dataset. If `no_patience`, will not use early stopping.",
 )
-parser.add_argument("--split_val_set_per_condition", action="store_true", help="Get the val set by splitting by conditions, keeping all samples for each condition together.")
+parser.add_argument(
+    "--split_val_set_per_condition",
+    action="store_true",
+    help="Get the val set by splitting by conditions, keeping all samples for each condition together.",
+)
 parser.add_argument("--mixup", action="store_true", help="Use mixup data augmentation")
 parser.add_argument(
     "--mixup-alpha", type=float, default=0.2, help="Mixup alpha parameter"
@@ -102,8 +106,8 @@ parser.add_argument(
 )
 
 # Experiment parameters
-parser.add_argument("--lr", default=0.0009, type=float, help="Learning rate.")
-parser.add_argument("--weight_decay", default=None, type=float, help="Weight decay.")
+parser.add_argument("--lr", default=0.0002, type=float, help="Learning rate.")
+parser.add_argument("--weight_decay", default=None, type=float, help="Weight decay for AdamW, if None, will use Adam.")
 parser.add_argument(
     "--proj_dim",
     default=768,
@@ -115,6 +119,20 @@ parser.add_argument(
     action="store_true",
     help="""
                     If true, will use the image projector, otherwise will skip it.
+                    """,
+)
+parser.add_argument(
+    "--use_eeg_denoiser",
+    action="store_true",
+    help="""
+                    If true, will use the eeg denoiser, otherwise will skip it.
+                    """,
+)
+parser.add_argument(
+    "--saliency",
+    action="store_true",
+    help="""
+                    If true, will calculate the saliency maps, otherwise will skip it.
                     """,
 )
 parser.add_argument(
@@ -257,6 +275,7 @@ class IE:
         self.batch_size_img = 500
         self.n_epochs = args.epoch
         self.n_ways = n_ways
+        self.saliency = args.saliency
         self.val_set_size = 740
         self.nSub = nsub
 
@@ -305,10 +324,11 @@ class IE:
             self.args.dnn,
             self.nSub,
             self.batch_size,
-            mixup_in_class=self.use_mixup_in_class, 
-            use_mixup=self.use_mixup, 
+            mixup_in_class=self.use_mixup_in_class,
+            use_mixup=self.use_mixup,
             mixup_val_set_size=self.val_set_size,
             n_ways=self.n_ways,
+            eeg_denoiser=self.args.use_eeg_denoiser,
             dataset_mode=dataset_mode,
             val_set_per_condition=self.args.split_val_set_per_condition
         )
@@ -323,14 +343,6 @@ class IE:
             self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2)
             )
 
-#         self.scheduler = OneCycleLR(
-#             self.optimizer,
-#             max_lr    = self.lr,            # same base
-#             div_factor= 25,              # start lr = max_lr/25
-#             final_div_factor=250,        # end lr = max_lr/250
-#             pct_start = 0.3,             # up-ramp for 30 % of training
-#             total_steps = len(train_loader) * self.n_epochs,
-# )
 
         # Metrics
         best_val_top1 = 0
@@ -357,17 +369,18 @@ class IE:
                 # img = Variable(img.cuda().type(self.Tensor))
                 eeg = eeg.to(device)
                 img_features = img.to(device)
-                
 
                 if self.use_mixup:
                     # Apply mixup to both EEG and image features using the same permutation and lambda
                     # This maintains correspondence between mixed samples
-                    mixed_eeg, mixed_img = mixup(self.mixup_alpha, eeg, img_features, device)
+                    mixed_eeg, mixed_img = mixup(
+                        self.mixup_alpha, eeg, img_features, device
+                    )
 
                     # Ensure all tensors are of the same type
                     mixed_eeg = mixed_eeg.type(torch.FloatTensor).to(device)
                     mixed_img = mixed_img.type(torch.FloatTensor).to(device)
-                    
+
                     eeg = torch.concatenate((eeg, mixed_eeg), axis=0)
                     img_features = torch.concatenate((img_features, mixed_img), axis=0)
 
@@ -513,17 +526,32 @@ class IE:
         save_checkpoint_wandb(save_path, self.nSub)
         self.model.eval()
 
-        with torch.no_grad():
+        saliencies = []
+
+        with torch.set_grad_enabled(self.saliency):
             for teeg, tlabel in tqdm(test_loader):
                 teeg = teeg.to(device)
                 tlabel = tlabel.to(device)
                 timg = test_centers.to(device)
+
+                if self.saliency:
+                    teeg.requires_grad = True
 
                 # Feed through the model
                 tfea, timg = self.model(teeg, timg)
 
                 similarity = (tfea @ timg.t()).softmax(dim=-1)
                 _, indices = similarity.topk(5)
+                scores, _ = similarity.max(dim=-1)
+
+                if self.saliency:
+                    # Calculate saliency maps
+                    scores.sum().backward()
+                    saliency_map = teeg.grad.data
+                    saliencies.append(
+                        saliency_map.abs().mean(dim=-1).mean(dim=-1).cpu().numpy()
+                    )
+                    teeg.grad.data.zero_()
 
                 tt_label = tlabel.view(-1, 1)
                 total += tlabel.size(0)
@@ -558,6 +586,8 @@ class IE:
                 for i in range(len(n_way_top1))
             ]
 
+        saliencies = np.concat(saliencies, axis=0).mean(axis=0)
+
         print(
             f">> Subject {self.nSub} - The test Top1-%.6f, Top3-%.6f, Top5-%.6f"
             % (top1_acc, top3_acc, top5_acc)
@@ -566,10 +596,22 @@ class IE:
         for i, n_way in enumerate(self.n_ways):
             print(f"  {n_way}-way: {n_way_top1_acc[i]:.6f}")
 
-        return top1_acc, top3_acc, top5_acc, n_way_top1_acc, train_results, best_val_top1
+        return (
+            top1_acc,
+            top3_acc,
+            top5_acc,
+            train_results,
+            n_way_top1_acc,
+            best_val_top1,
+            saliencies,
+        )
+        # writer.close()
 
 
 def main():
+    assert (
+        args.use_eeg_denoiser or not args.saliency
+    ), "Saliency maps can only be calculated if EEG denoiser is used."
     num_sub = args.num_sub
     n_ways = [2, 5, 10]
     cal_num = 0
@@ -578,6 +620,7 @@ def main():
     aver3 = []
     aver5 = []
     avern = []
+    all_saliencies = []
     best_val_top1_avg = 0
     for i in range(num_sub):
 
@@ -588,7 +631,9 @@ def main():
         print("Subject %d" % (i + 1))
         ie = IE(args, n_ways, i + 1)
 
-        Acc, Acc3, Acc5, n_way_top1_acc, train_results, best_val_top1 = ie.train()
+        Acc, Acc3, Acc5, train_results, n_way_top1_acc, best_val_top1, saliencies = (
+            ie.train()
+        )
         print("THE BEST ACCURACY IS " + str(Acc))
 
         endtime = time.time()
@@ -598,6 +643,7 @@ def main():
         aver3.append(Acc3)
         aver5.append(Acc5)
         avern.append(n_way_top1_acc)
+        all_saliencies.append(saliencies)
         best_val_top1_avg += best_val_top1
 
         avg_train_results.append(train_results)
@@ -611,7 +657,10 @@ def main():
             for k in range(len(avg_train_results[i][e])):
                 metric_name = {0: "loss", 1: "loss_eeg", 2: "loss_img", 3: "top1"}
                 wandb.log(
-                    {"epoch": epoch, f"{mode}/{metric_name[k]}": avg_train_results[i][e][k]}
+                    {
+                        "epoch": epoch,
+                        f"{mode}/{metric_name[k]}": avg_train_results[i][e][k],
+                    }
                 )
     # Log average (across subjects) best val top1 accuracy
     wandb.run.summary["val/top1"] = best_val_top1_avg / num_sub
@@ -632,6 +681,13 @@ def main():
         wandb.run.summary[f"{subj}/top5"] = aver5[i]
         for j in range(len(avern[i])):
             wandb.run.summary[f"{subj}/{n_ways[j]}-way"] = avern[i][j]
+
+    # Log saliency maps
+    all_saliencies = np.array(all_saliencies)
+    saliency_mean = np.mean(all_saliencies, axis=0)
+    saliency_std = np.std(all_saliencies, axis=0)
+    wandb.run.summary[f"saliency_mean"] = saliency_mean
+    wandb.run.summary[f"saliency_std"] = saliency_std
 
     column = np.arange(1, cal_num + 1).tolist()
     column.append("ave")

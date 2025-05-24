@@ -5,7 +5,23 @@ from torch import Tensor
 from einops.layers.torch import Rearrange
 from models.submodules import Debugger, MultiScaleTemporalConvBlock, ResidualAdd, EEG_GAT, SqueezeExcite, channel_attention, FlattenHead, NUM_ELECTRODES
 
+
 # ===== EEG Encoder =====
+class EEG_Denoiser(nn.Module):
+    def __init__(self, dim=250, n_aggregations=4, mlp_ratio=4):
+        super().__init__()
+        self.denoiser = nn.Sequential(
+            Rearrange("b a c s -> b c (a s)"),
+            nn.Linear(dim * n_aggregations, dim * mlp_ratio),
+            nn.ELU(),
+            nn.Linear(dim * mlp_ratio, dim),
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.denoiser(x).unsqueeze(1)
+        return x
+
+
 class Enc_eeg(nn.Sequential):
     def __init__(self, emb_size=40, config="GA", patch_encoder="tsconv", **kwargs):
         super().__init__(
@@ -90,24 +106,6 @@ class PatchEmbedding(nn.Module):
                     ),
                     dropout_p=kwargs['mstc_dropout_p'],
                 ),
-
-                # # Spatial electrode-level SE & mixing across electrodes
-                # Rearrange("b c h w -> b h c w"),
-                # SqueezeExcite(NUM_ELECTRODES),
-                # nn.Conv2d(NUM_ELECTRODES, NUM_ELECTRODES, 1, bias=False),
-                # nn.BatchNorm2d(NUM_ELECTRODES),
-                # nn.ELU(inplace=True),
-                # Rearrange("b h c w -> b c h w"),
-
-                # # Another temporal convolution
-                # nn.Conv2d(final_channels, final_channels, 
-                #           kernel_size=(1, second_temporal_conv_kernel_size), 
-                #           stride=(1, 1), 
-                #           padding=(0, (second_temporal_conv_kernel_size - 1) // 2), 
-                #         #   groups=final_channels,
-                #           bias=True),
-                # nn.BatchNorm2d(final_channels),
-                # nn.ELU(),
 
                 # Aggregation across electrodes
                 nn.Conv2d(final_channels, final_channels, (63, 1), (1, 1)),

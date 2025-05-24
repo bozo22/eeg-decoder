@@ -1,7 +1,8 @@
 import torch.nn as nn
 import logging as l
-from models.modules import Proj_eeg, Proj_img, Enc_eeg
+from models.modules import Proj_eeg, Proj_img, Enc_eeg, EEG_Denoiser
 from torch.nn import init
+
 
 class SuperNICE(nn.Module):
     def __init__(self, args):
@@ -20,6 +21,7 @@ class SuperNICE(nn.Module):
         self.proj_dim = args.proj_dim
         self.eeg_proj_do = 0.5
         self.img_proj_do = 0.3
+        self.use_eeg_denoiser = args.use_eeg_denoiser
 
         # Extract MSTC parameters if using multiscale encoder
         mstc_kwargs = {}
@@ -33,7 +35,9 @@ class SuperNICE(nn.Module):
                 'mstc_dropout_p': args.mstc_dropout_p,
                 'pe_dropout_p': args.pe_dropout_p
             }
+
         self.Enc_eeg = Enc_eeg(config=args.config, patch_encoder=args.eeg_patch_encoder, **mstc_kwargs)
+        self.EEG_Denoiser = EEG_Denoiser() if self.use_eeg_denoiser else nn.Identity()
         self.Proj_eeg = Proj_eeg(
             input_dim=self.eeg_projector_input_dim,
             proj_dim=self.proj_dim,
@@ -52,6 +56,7 @@ class SuperNICE(nn.Module):
 
     def forward(self, eeg, img):
         # obtain the EEG features
+        eeg = self.EEG_Denoiser(eeg)
         eeg_features = self.Enc_eeg(eeg)
 
         # project the features to a shared multimodal embedding space
