@@ -134,7 +134,7 @@ parser.add_argument(
 # MultiScaleTemporalConvBlock parameters
 parser.add_argument(
     "--mstc_out_channels",
-    default=60,
+    default=42,
     type=int,
     help="Number of output channels for MultiScaleTemporalConvBlock"
 )
@@ -146,13 +146,13 @@ parser.add_argument(
 )
 parser.add_argument(
     "--mstc_dilation_rates",
-    default="1,2,3",
+    default="1,1,2",
     type=str,
     help="Comma-separated list of dilation rates for MultiScaleTemporalConvBlock"
 )
 parser.add_argument(
     "--mstc_pool_kernel_size",
-    default="1,35",
+    default="1,51",
     type=str,
     help="Comma-separated tuple of kernel size for pooling in MultiScaleTemporalConvBlock"
 )
@@ -164,7 +164,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--mstc_dropout_p",
-    default=0.2,
+    default=0.3,
     type=float,
     help="Dropout probability for MultiScaleTemporalConvBlock"
 )
@@ -470,10 +470,8 @@ class IE:
                     train_results[1, e, 3] = val_top1
 
                     if new_best_epoch(args.split_val_set_per_condition, best_val_loss, best_val_top1, avg_val_loss, val_top1):
-                        if args.split_val_set_per_condition:
-                            best_val_top1 = val_top1
-                        else:
-                            best_val_loss = avg_val_loss
+                        best_val_top1 = val_top1
+                        best_val_loss = avg_val_loss
                         best_epoch = e + 1
                         epochs_no_gain = 0
                         os.makedirs(model_checkpoint_path, exist_ok=True)
