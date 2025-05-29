@@ -15,16 +15,17 @@ def seed_experiments(seed):
     torch.backends.cudnn.benchmark = False
 
 
-def save_model(model, chekpoint_path, run_name, subject_id):
+def save_model(model, chekpoint_path, run_name, subject_id, checkpoint_uuid):
     model_name = model.__class__.__name__ if not isinstance(model, nn.DataParallel) else model.module.__class__.__name__
     model_state_dict = model.state_dict() if not isinstance(model, nn.DataParallel) else model.module.state_dict()
-    save_path = os.path.join(chekpoint_path, f"{model_name}-{run_name}-sub{subject_id}.pth")
+    save_path = os.path.join(chekpoint_path, f"{model_name}-{run_name}-sub{subject_id}-{checkpoint_uuid}.pth")
     torch.save(model_state_dict, save_path)
     print(f"Model {model_name} saved to {save_path}")
 
-def load_model(model, chekpoint_path, run_name, subject_id, device=None): 
+def load_model(model, chekpoint_path, run_name, subject_id, checkpoint_uuid, device=None): 
     model_name = model.__class__.__name__ if not isinstance(model, nn.DataParallel) else model.module.__class__.__name__
-    save_path = os.path.join(chekpoint_path, f"{model_name}-{run_name}-sub{subject_id}.pth")
+    # Generate a unique identifier for the checkpoint
+    save_path = os.path.join(chekpoint_path, f"{model_name}-{run_name}-sub{subject_id}-{checkpoint_uuid}.pth")
     model_state_dict = torch.load(save_path, map_location=device)
     model.load_state_dict(model_state_dict)
     print(f"Model {model_name} loaded from {save_path}")

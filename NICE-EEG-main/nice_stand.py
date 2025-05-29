@@ -7,6 +7,7 @@ use 250 Hz data
 import os
 import argparse
 import time
+import uuid
 import numpy as np
 import pandas as pd
 from pprint import pprint
@@ -15,7 +16,6 @@ import wandb
 
 import torch
 import torch.nn as nn
-from torch import Tensor
 
 from functools import partialmethod
 from tqdm import tqdm
@@ -28,7 +28,8 @@ from utils.utils import (
     seed_experiments,
     wandb_login,
 )
-from utils.dataset import get_dataloaders, mixup
+from utils.dataset import SMALL_RUN_RATIO, get_dataloaders, mixup
+
 
 # gpus = [0]
 # os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
@@ -36,6 +37,7 @@ from utils.dataset import get_dataloaders, mixup
 NICE_path = os.path.dirname(os.path.abspath(__file__))
 result_path = os.path.join(NICE_path, "results")
 model_checkpoint_path = os.path.join(result_path, "checkpoints")
+checkpoint_uuid = str(uuid.uuid4())[:8]
 
 
 parser = argparse.ArgumentParser(
@@ -44,7 +46,7 @@ parser = argparse.ArgumentParser(
 # Architectures
 parser.add_argument("--dnn", default="clip", type=str)
 # Training parameters
-parser.add_argument("--epoch", default="200", type=int)
+parser.add_argument("--epoch", default="150", type=int)
 parser.add_argument(
     "--num_sub",
     default=10,
@@ -62,6 +64,11 @@ parser.add_argument(
 parser.add_argument(
     "--dataset_path", default="Things-EEG2/", type=str, help="Path to the dataset. "
 )
+parser.add_argument(
+    "--split_val_set_per_condition",
+    action="store_true",
+    help="Get the val set by splitting by conditions, keeping all samples for each condition together.",
+)
 # Auxiliary parameters
 parser.add_argument(
     "--seed", default=2023, type=int, help="seed for initializing training. "
@@ -77,22 +84,8 @@ parser.add_argument(
     "--mode",
     default=None,
     type=str,
-    choices=["debug", "small_run"],
-    help="If `debug`, will run in debug mode with only 100 samples per subject. If `small_run`, will use only  25% of the dataset.",
-)
-parser.add_argument(
-    "--split_val_set_per_condition",
-    action="store_true",
-    help="Get the val set by splitting by conditions, keeping all samples for each condition together.",
-)
-parser.add_argument("--mixup", action="store_true", help="Use mixup data augmentation")
-parser.add_argument(
-    "--mixup-alpha", type=float, default=0.2, help="Mixup alpha parameter"
-)
-parser.add_argument(
-    "--mixup_in_class",
-    action="store_true",
-    help="Use mixup data augmentation within the same class",
+    choices=["debug", "small_run", "no_patience"],
+    help="If `debug`, will run in debug mode with only 100 samples per subject. If `small_run`, will use only  25% of the dataset. If `no_patience`, will not use early stopping.",
 )
 # WandB parameters
 parser.add_argument(
@@ -102,8 +95,20 @@ parser.add_argument(
     "--run_group", default=None, type=str, help="Group name for the WandB run."
 )
 
+# Mixup parameters
+parser.add_argument("--mixup", action="store_true", help="Use mixup data augmentation")
+parser.add_argument(
+    "--mixup-alpha", type=float, default=0.3, help="Mixup alpha parameter"
+)
+parser.add_argument(
+    "--mixup_in_class",
+    action="store_true",
+    help="Use mixup data augmentation within the same class",
+)
+
 # Experiment parameters
 parser.add_argument("--lr", default=0.0002, type=float, help="Learning rate.")
+parser.add_argument("--weight_decay", default=None, type=float, help="Weight decay for AdamW, if None, will use Adam.")
 parser.add_argument(
     "--proj_dim",
     default=768,
@@ -138,36 +143,67 @@ parser.add_argument(
     choices=["SA", "GA", "SAGA", "GASA", "none"],
     help="Configuration for the EEG encoder.",
 )
+parser.add_argument(
+    "--eeg_patch_encoder",
+    default="tsconv",
+    type=str,
+    choices=["tsconv", "multiscale_1block", "multiscale_2block"],
+    help="Configuration for the EEG patch encoder"
+)
+# MultiScaleTemporalConvBlock parameters
+parser.add_argument(
+    "--mstc_out_channels",
+    default=42,
+    type=int,
+    help="Number of output channels for MultiScaleTemporalConvBlock"
+)
+parser.add_argument(
+    "--mstc_kernel_sizes",
+    default="3,15,25",
+    type=str,
+    help="Comma-separated list of kernel sizes for MultiScaleTemporalConvBlock"
+)
+parser.add_argument(
+    "--mstc_dilation_rates",
+    default="1,1,2",
+    type=str,
+    help="Comma-separated list of dilation rates for MultiScaleTemporalConvBlock"
+)
+parser.add_argument(
+    "--mstc_pool_kernel_size",
+    default="1,51",
+    type=str,
+    help="Comma-separated tuple of kernel size for pooling in MultiScaleTemporalConvBlock"
+)
+parser.add_argument(
+    "--mstc_pool_stride",
+    default="1,5",
+    type=str,
+    help="Comma-separated tuple of stride for pooling in MultiScaleTemporalConvBlock"
+)
+parser.add_argument(
+    "--mstc_dropout_p",
+    default=0.3,
+    type=float,
+    help="Dropout probability for MultiScaleTemporalConvBlock"
+)
+parser.add_argument(
+    "--pe_dropout_p",
+    default=0.3,
+    type=float,
+    help="Dropout probability for EEG patch encoder"
+)
 
 args = parser.parse_args()
-
 if args.mixup and args.mixup_in_class:
     raise ValueError(
         "Cannot use both mixup across classes and mixup within the same class. Please choose one."
     )
 
-pprint(args)
-
-# Set device
-device = torch.device(
-    "cuda" if torch.cuda.is_available() and args.device == "gpu" else "cpu"
-)
-print(f"Using device: {device}")
-# Set debug logger, if debug is True
-if args.mode == "debug":
-    l.basicConfig(level=l.DEBUG, format="%(levelname)s: %(message)s")
-    l.debug(">>> Running in DEBUG mode!")
-tqdm.__init__ = partialmethod(
-    tqdm.__init__, disable=False if args.mode == "debug" else True
-)
-
-# ===== Seed experiments =====
-seed_experiments(args.seed)
-
 # ===== WandB setup =====
 wandb_login(args.disable_wandb)
 run = wandb.init(
-    # entity="EEG_decoder",
+    entity="EEG_decoder",
     project="EEG-Decoder",
     config=vars(args),
     mode="disabled" if args.disable_wandb else "online",
@@ -177,6 +213,25 @@ for k, v in run.config.items():
     setattr(args, k, v)
 pprint(args)
 
+# ===== WandB metrics =====
+wandb.define_metric("epoch")
+wandb.define_metric("train/*", step_metric="epoch")
+wandb.define_metric("val/*", step_metric="epoch")
+
+# ===== Set device =====
+device = torch.device(
+    "cuda" if torch.cuda.is_available() and args.device == "gpu" else "cpu"
+)
+print(f"Using device: {device}")
+# ===== Set debug logger, if debug is True =====
+if args.mode == "debug":
+    l.basicConfig(level=l.DEBUG, format="%(levelname)s: %(message)s")
+    l.debug(">>> Running in DEBUG mode!")
+tqdm.__init__ = partialmethod(tqdm.__init__, disable=False if args.mode == "debug" else True)
+
+# ===== Seed experiments =====
+seed_experiments(args.seed)
+
 # ===== Prepare run name =====
 run_name = f"lr({args.lr})-proj_dim({args.proj_dim})"
 if args.mode == "debug":
@@ -184,28 +239,33 @@ if args.mode == "debug":
 
 if args.use_image_projector:
     print(f">>> Using image projector")
-    run_name += f"-useIP"
+    run_name = f"useIP-" + run_name
 else:
     print(f">>> Skipping image projector")
-    run_name += f"-skipIP"
+    run_name = f"skipIP-" + run_name
+run_name = f"{args.eeg_patch_encoder}-" + run_name
+run_name = f"mixup({args.mixup_alpha if args.mixup else 'none'})-{run_name}"
+run_name = f"spatial({args.config})-denoiser({args.use_eeg_denoiser})-{run_name}"
 run.name = run_name
-
-# ===== WandB metrics =====
-wandb.define_metric("epoch")
-wandb.define_metric("train/*", step_metric="epoch")
-wandb.define_metric("val/*", step_metric="epoch")
 
 # ===== Pre-run setup =====
 dataset_mode = None
 if args.mode == "small_run":
     epochs = 30
-    print(f">>> Training with small run (25% of the dataset and {epochs} epochs)")
+    print(f">>> Training with small run ({SMALL_RUN_RATIO*100}% of the dataset and {epochs} epochs)")
     dataset_mode = "small"
     args.epoch = epochs
 elif args.mode == "debug":
     print(">>> Training with debug mode (100 training EEG samples per subject only)")
     dataset_mode = "debug"
 
+# ===== Parse comma-separated arguments into tuples/lists =====
+args.mstc_kernel_sizes = tuple(map(int, args.mstc_kernel_sizes.split(',')))
+args.mstc_dilation_rates = tuple(map(int, args.mstc_dilation_rates.split(',')))
+assert len(args.mstc_kernel_sizes) == len(args.mstc_dilation_rates), "Kernel sizes and dilation rates must have the same length"
+args.mstc_pool_kernel_size = tuple(map(int, args.mstc_pool_kernel_size.split(',')))
+args.mstc_pool_stride = tuple(map(int, args.mstc_pool_stride.split(',')))
+assert len(args.mstc_pool_kernel_size) == len(args.mstc_pool_stride), "Pool kernel size and stride must have the same length"
 
 # Image2EEG
 class IE:
@@ -220,6 +280,7 @@ class IE:
         self.n_ways = n_ways
         self.saliency = args.saliency
         self.val_set_size = 740
+        self.nSub = nsub
 
         self.use_mixup = args.mixup
         self.mixup_alpha = args.mixup_alpha
@@ -229,7 +290,7 @@ class IE:
         self.lr = args.lr
         self.b1 = 0.5
         self.b2 = 0.999
-        self.nSub = nsub
+        self.weight_decay = args.weight_decay
 
         self.start_epoch = 0
         self.eeg_data_path = os.path.join(args.dataset_path, "Preprocessed_data_250Hz")
@@ -272,19 +333,30 @@ class IE:
             n_ways=self.n_ways,
             eeg_denoiser=self.args.use_eeg_denoiser,
             dataset_mode=dataset_mode,
-            val_set_per_condition=self.args.split_val_set_per_condition,
+            val_set_per_condition=self.args.split_val_set_per_condition
         )
 
-        # Optimizers
-        self.optimizer = torch.optim.Adam(
+        # Optimizer & Scheduler
+        if self.weight_decay is not None:
+            self.optimizer = torch.optim.AdamW(
+                self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2), weight_decay=self.weight_decay
+            )
+        else:
+            self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2)
-        )
+            )
+
 
         # Metrics
         best_val_top1 = 0
         best_val_loss = np.inf
         # dim1 - for train/val, dim2 - for epoch, dim3 - for loss/loss_eeg/loss_img/top1acc
-        train_results = np.zeros((2, self.n_epochs, 4))
+        train_results = np.zeros(
+            (2, self.n_epochs, 4)
+        )
+        epochs_no_gain   = 0
+        patience         = 10             # stop if no gain for 10 epochs after epoch_patience
+        epoch_patience   = self.n_epochs if args.mode in ["no_patience", "small_run"] else self.n_epochs // 3
 
         for e in range(self.n_epochs):
             epoch_losses = []
@@ -336,7 +408,8 @@ class IE:
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-
+            
+                # self.scheduler.step()
             # Log epoch metrics
             avg_epoch_loss = sum(epoch_losses) / len(epoch_losses)
             avg_epoch_loss_eeg = sum(epoch_losses_eeg) / len(epoch_losses_eeg)
@@ -412,24 +485,20 @@ class IE:
                     train_results[1, e, 2] = avg_val_loss_img
                     train_results[1, e, 3] = val_top1
 
-                    if new_best_epoch(
-                        args.split_val_set_per_condition,
-                        best_val_loss,
-                        best_val_top1,
-                        avg_val_loss,
-                        val_top1,
-                    ):
-                        if args.split_val_set_per_condition:
-                            best_val_top1 = val_top1
-                        else:
-                            best_val_loss = avg_val_loss
+                    if new_best_epoch(args.split_val_set_per_condition, best_val_loss, best_val_top1, avg_val_loss, val_top1):
+                        best_val_top1 = val_top1
+                        best_val_loss = avg_val_loss
                         best_epoch = e + 1
+                        epochs_no_gain = 0
                         os.makedirs(model_checkpoint_path, exist_ok=True)
-                        print(f"New best epoch - {best_epoch}")
+                        print(f"!!! New best epoch - {best_epoch}")
                         # Save models, handling both DataParallel and non-DataParallel cases
                         save_model(
-                            self.model, model_checkpoint_path, run_name, self.nSub
+                            self.model, model_checkpoint_path, run_name, self.nSub, checkpoint_uuid
                         )
+                    elif e >= epoch_patience:
+                        epochs_no_gain += 1
+
                 print(
                     "Epoch:",
                     e + 1,
@@ -441,6 +510,11 @@ class IE:
             endtime_epoch = time.time()
             print(f"Epoch {e + 1} took {endtime_epoch - starttime_epoch} seconds")
 
+            # Early stopping
+            if epochs_no_gain >= patience:
+                print(f">>> No gain for {patience} epochs after epoch {epoch_patience}, stop training")
+                break
+
         # ===== Test =====
         total = 0
         top1 = 0
@@ -450,7 +524,7 @@ class IE:
         n_way_top1 = [0] * len(self.n_ways)
 
         self.model, save_path = load_model(
-            self.model, model_checkpoint_path, run_name, self.nSub
+            self.model, model_checkpoint_path, run_name, self.nSub, checkpoint_uuid
         )
         save_checkpoint_wandb(save_path, self.nSub)
         self.model.eval()
@@ -515,7 +589,7 @@ class IE:
                 for i in range(len(n_way_top1))
             ]
 
-        saliencies = np.concat(saliencies, axis=0).mean(axis=0)
+            saliencies = np.concat(saliencies, axis=0).mean(axis=0) if self.saliency else []
 
         print(
             f">> Subject {self.nSub} - The test Top1-%.6f, Top3-%.6f, Top5-%.6f"
@@ -555,7 +629,6 @@ def main():
 
         cal_num += 1
         starttime = time.time()
-        seed_n = np.random.randint(args.seed)
 
         print("Subject %d" % (i + 1))
         ie = IE(args, n_ways, i + 1)
@@ -612,16 +685,28 @@ def main():
             wandb.run.summary[f"{subj}/{n_ways[j]}-way"] = avern[i][j]
 
     # Log saliency maps
-    all_saliencies = np.array(all_saliencies)
-    saliency_mean = np.mean(all_saliencies, axis=0)
-    saliency_std = np.std(all_saliencies, axis=0)
-    wandb.run.summary[f"saliency_mean"] = saliency_mean
-    wandb.run.summary[f"saliency_std"] = saliency_std
+    if args.saliency:
+        all_saliencies = np.array(all_saliencies)
+        saliency_mean = np.mean(all_saliencies, axis=0)
+        saliency_std = np.std(all_saliencies, axis=0)
+        wandb.run.summary[f"saliency_mean"] = saliency_mean
+        wandb.run.summary[f"saliency_std"] = saliency_std
 
     column = np.arange(1, cal_num + 1).tolist()
     column.append("ave")
     pd_all = pd.DataFrame(columns=column, data=[aver, aver3, aver5])
     pd_all.to_csv(os.path.join(result_path, "train_results.csv"))
+
+    # Print results table
+    print("\nResults Table:")
+    print("-" * 120)
+    headers = [f"Subject{i+1}" for i in range(10)] + ["Average"]
+    print(f"{'':12} " + " ".join(f"{h:>8}" for h in headers))
+    print("-" * 120)
+    print(f"{'Top-1':12} " + " ".join(f"{acc:8.2f}" for acc in aver))
+    print(f"{'Top-3':12} " + " ".join(f"{acc:8.2f}" for acc in aver3))
+    print(f"{'Top-5':12} " + " ".join(f"{acc:8.2f}" for acc in aver5))
+    print("-" * 120)
 
     run.finish()
 

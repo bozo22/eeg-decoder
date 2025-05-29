@@ -10,17 +10,34 @@ class SuperNICE(nn.Module):
 
         # Config for both Img and EEG depending on the image features type extraced by CLIP
         self.img_projector_input_dim = 768
-        self.eeg_projector_input_dim = 1440
+        if args.eeg_patch_encoder == "tsconv":
+            self.eeg_projector_input_dim = 1440
+        elif args.eeg_patch_encoder == "multiscale_1block":
+            self.eeg_projector_input_dim =  (250 - args.mstc_pool_kernel_size[1]) // args.mstc_pool_stride[1] + 1
+            self.eeg_projector_input_dim = 40 * self.eeg_projector_input_dim
+        elif args.eeg_patch_encoder == "multiscale_2block":
+            self.eeg_projector_input_dim = 1400
         # Standard parameters for both Img and EEG projectors
         self.proj_dim = args.proj_dim
         self.eeg_proj_do = 0.5
         self.img_proj_do = 0.3
         self.use_eeg_denoiser = args.use_eeg_denoiser
 
-        self.EEG_Denoiser = nn.Identity()
-        if self.use_eeg_denoiser:
-            self.EEG_Denoiser = EEG_Denoiser()
-        self.Enc_eeg = Enc_eeg(config=args.config)
+        # Extract MSTC parameters if using multiscale encoder
+        mstc_kwargs = {}
+        if args.eeg_patch_encoder == "multiscale_1block" or args.eeg_patch_encoder == "multiscale_2block":
+            mstc_kwargs = {
+                'mstc_out_channels': args.mstc_out_channels,
+                'mstc_kernel_sizes': args.mstc_kernel_sizes,
+                'mstc_dilation_rates': args.mstc_dilation_rates,
+                'mstc_pool_kernel_size': args.mstc_pool_kernel_size,
+                'mstc_pool_stride': args.mstc_pool_stride,
+                'mstc_dropout_p': args.mstc_dropout_p,
+                'pe_dropout_p': args.pe_dropout_p
+            }
+
+        self.Enc_eeg = Enc_eeg(config=args.config, patch_encoder=args.eeg_patch_encoder, **mstc_kwargs)
+        self.EEG_Denoiser = EEG_Denoiser() if self.use_eeg_denoiser else nn.Identity()
         self.Proj_eeg = Proj_eeg(
             input_dim=self.eeg_projector_input_dim,
             proj_dim=self.proj_dim,
@@ -58,11 +75,13 @@ class SuperNICE(nn.Module):
 
 
 def weights_init_normal(m):
-    classname = m.__class__.__name__
-    if classname.find("Conv") != -1 and classname.find("GATConv") == -1:
-        init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find("Linear") != -1:
-        init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find("BatchNorm") != -1:
-        init.normal_(m.weight.data, 1.0, 0.02)
-        init.constant_(m.bias.data, 0.0)
+    # Conv2d and Linear
+    if isinstance(m, (nn.Conv2d, nn.Linear)):
+        init.normal_(m.weight, mean=0.0, std=0.02)
+        if m.bias is not None:
+            init.constant_(m.bias, 0.0)
+
+    # Normalisation layers
+    elif isinstance(m, (nn.BatchNorm2d, nn.LayerNorm)):
+        init.normal_(m.weight, mean=1.0, std=0.02)
+        init.constant_(m.bias, 0.0)

@@ -16,6 +16,8 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 
 
+NUM_ELECTRODES = 63
+
 class channel_attention(nn.Module):
     def __init__(self, sequence_num=250, inter=30):
         super(channel_attention, self).__init__()
@@ -130,8 +132,121 @@ class FlattenHead(nn.Sequential):
     def forward(self, x):
         x = x.contiguous().view(x.size(0), -1)
         return x
-    
-    
+
+
+# ===== Patch Encoder =====
+
+class MultiScaleTemporalConvBlock(nn.Module):
+    """
+    Inception-style multi-scale temporal convolution for EEG.
+
+    Options
+    -------
+    • dilation per branch
+    • optional AvgPool for temporal down-sampling
+    • optional Squeeze-and-Excitation (channel attention)
+    """
+
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int,
+        kernel_sizes=(3, 11, 25),
+        dilation_rates=(1, 1, 1),
+        pool_cfg=dict(kernel_size=(1, 51), stride=(1, 5)),  # set stride>1 to down-sample
+        dropout_p: float = 0.1,
+    ):
+        super().__init__()
+        assert len(kernel_sizes) == len(dilation_rates), "kernel_sizes and dilation_rates must match"
+        n_branches = len(kernel_sizes)
+        assert out_ch % n_branches == 0, "out_ch must be divisible by #branches"
+        branch_ch = out_ch // n_branches
+
+        # parallel temporal conv branches
+        self.branches = nn.ModuleList()
+        for k, d in zip(kernel_sizes, dilation_rates):
+            pad = ((k - 1) * d) // 2  # ensures same temporal length
+            self.branches.append(
+                nn.Sequential(
+                    nn.Conv2d(
+                        in_ch,
+                        branch_ch,
+                        kernel_size=(1, k),
+                        stride=(1, 1),
+                        padding=(0, pad),
+                        dilation=(1, d),
+                        bias=False,
+                    ),
+                    nn.BatchNorm2d(branch_ch),
+                    nn.ELU(inplace=True),
+                )
+            )
+
+        # feature-level channel-attention (SE)
+        self.se = SqueezeExcite(out_ch, hidden_dim=5)
+
+        # 1×1 conv to mix branch features (acts like a pointwise projection)
+        self.mix = nn.Sequential(
+            nn.Conv2d(out_ch, out_ch, kernel_size=1, bias=False),
+            nn.BatchNorm2d(out_ch),
+            nn.ELU(inplace=True),
+        )
+
+        # temporal pooling / down-sampling
+        self.pool = nn.AvgPool2d(**pool_cfg)
+
+        # residual path (identity or 1×1 projection)
+        if in_ch == out_ch:
+            self.residual = nn.Identity()
+        else:
+            self.residual = nn.Sequential(
+                nn.Conv2d(in_ch, out_ch, kernel_size=1, bias=False),
+                nn.BatchNorm2d(out_ch),
+            )
+
+        self.dropout = nn.Dropout2d(dropout_p) if dropout_p > 0 else nn.Identity()
+
+    def forward(self, x: Tensor) -> Tensor:
+        # x: [B, in_ch, C=63, T]
+        branch_outs = [b(x) for b in self.branches]     # list of [B, branch_ch, 63, T]
+        x_cat = torch.cat(branch_outs, dim=1)           # [B, out_ch, 63, T]
+        x_cat = self.mix(x_cat)                         # pointwise fusion
+        
+        x_cat = self.dropout(x_cat)
+        x_cat = self.se(x_cat)                          # feature-level channel attention
+
+        # residual add
+        x_cat = self.pool(x_cat + self.residual(x))
+        return x_cat
+
+
+
+class SqueezeExcite(nn.Module):
+    """Classic SE block (feature-level channel attention) with reduction ratio."""
+    def __init__(self, chan, hidden_dim=5):
+        super().__init__()
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Conv2d(chan, hidden_dim, 1, bias=False),
+            nn.ELU(inplace=True),
+            nn.Conv2d(hidden_dim, chan, 1, bias=False),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x):
+        scale = self.fc(self.pool(x))
+        return x * scale
+
+
+class Debugger(nn.Module):
+    def __init__(self, name):
+        super().__init__()
+        self.name = name
+
+    def forward(self, x: Tensor) -> Tensor:
+        print(f"{self.name} x.shape: {x.shape}")
+        return x
+
 # ===== Other useful modules =====
 
 class PatchEmbedding(nn.Module):

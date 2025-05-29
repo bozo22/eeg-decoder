@@ -9,9 +9,10 @@ import logging as l
 from torch.utils.data import DataLoader
 
 
-VALIDATION_NR_CONDITIONS = 200  # Same as for test set
+SMALL_RUN_RATIO = 0.60
+VALIDATION_NR_CONDITIONS = 200 # Same as for test set
 SAMPLES_PER_CONDITION = 10
-TEST_VAL_BATCH_SIZE = 200
+TEST_VAL_BATCH_SIZE = 1000
 
 
 def calculate_aggregations(data, eeg_denoiser=False):
@@ -25,18 +26,18 @@ def calculate_aggregations(data, eeg_denoiser=False):
     """
 
     batch, _, channels, timepoints = data.shape
-    n_aggr = 9 if eeg_denoiser else 1
+    n_aggr = 4 if eeg_denoiser else 1
     aggregations = np.empty((batch, n_aggr, channels, timepoints), dtype=data.dtype)
     aggregations[:, 0] = np.mean(data, axis=1)
     if eeg_denoiser:
-        aggregations[:, 1] = np.std(data, axis=1)
-        aggregations[:, 2] = np.min(data, axis=1)
-        aggregations[:, 3] = np.max(data, axis=1)
-        aggregations[:, 4] = np.median(data, axis=1)
-        aggregations[:, 5] = np.percentile(data, 5, axis=1)
-        aggregations[:, 6] = np.percentile(data, 95, axis=1)
-        aggregations[:, 7] = np.percentile(data, 10, axis=1)
-        aggregations[:, 8] = np.percentile(data, 90, axis=1)
+        aggregations[:, 1] = np.median(data, axis=1)
+        aggregations[:, 2] = np.percentile(data, 10, axis=1)
+        aggregations[:, 3] = np.percentile(data, 90, axis=1)
+        # aggregations[:, 1] = np.std(data, axis=1)
+        # aggregations[:, 2] = np.min(data, axis=1)
+        # aggregations[:, 3] = np.max(data, axis=1)
+        # aggregations[:, 5] = np.percentile(data, 5, axis=1)
+        # aggregations[:, 6] = np.percentile(data, 95, axis=1)
 
     return aggregations
 
@@ -55,8 +56,8 @@ def get_eeg_data(dir_path, data_mode=None, eeg_denoiser=False):
         print(">>> Using EEG features for 100 training samples only")
         train_data = train_data[:100]
     elif data_mode == "small":
-        print(">>> Using EEG features for 25 percent of the training samples")
-        train_data = train_data[: int(len(train_data) * 0.25)]
+        print(f">>> Using EEG features for {SMALL_RUN_RATIO*100}% of the training samples")
+        train_data = train_data[:int(len(train_data) * SMALL_RUN_RATIO)]
 
     # Calculate the aggregations
     train_data = calculate_aggregations(train_data, eeg_denoiser)
@@ -228,23 +229,9 @@ def get_dataloaders(
         test_n_way_centers.append(test_centers[:n_way])
 
     # Split train/val
-    if mixup_in_class or use_mixup:
-        val_eeg = torch.from_numpy(train_eeg[:mixup_val_set_size]).type(
-            torch.FloatTensor
-        )
-        val_image = torch.from_numpy(train_img_feature[:mixup_val_set_size]).type(
-            torch.FloatTensor
-        )
-        train_eeg = torch.from_numpy(train_eeg[mixup_val_set_size:]).type(
-            torch.FloatTensor
-        )
-        train_image = torch.from_numpy(train_img_feature[mixup_val_set_size:]).type(
-            torch.FloatTensor
-        )
-    else:
-        train_eeg, train_image, val_eeg, val_image = split_train_val(
-            train_eeg, train_img_feature, per_condition=val_set_per_condition
-        )
+    train_eeg, train_image, val_eeg, val_image = split_train_val(
+        train_eeg, train_img_feature, per_condition=val_set_per_condition
+    )
 
     # Create datasets
     train_dataset = torch.utils.data.TensorDataset(train_eeg, train_image)

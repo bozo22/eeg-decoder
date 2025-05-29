@@ -1,13 +1,14 @@
 import torch.nn as nn
 
+import torch as th
 from torch import Tensor
 from einops.layers.torch import Rearrange
-from models.submodules import ResidualAdd, EEG_GAT, channel_attention, FlattenHead
+from models.submodules import Debugger, MultiScaleTemporalConvBlock, ResidualAdd, EEG_GAT, SqueezeExcite, channel_attention, FlattenHead, NUM_ELECTRODES
 
 
 # ===== EEG Encoder =====
 class EEG_Denoiser(nn.Module):
-    def __init__(self, dim=250, n_channels=63, n_aggregations=9, mlp_ratio=4):
+    def __init__(self, dim=250, n_aggregations=4, mlp_ratio=4):
         super().__init__()
         self.denoiser = nn.Sequential(
             Rearrange("b a c s -> b c (a s)"),
@@ -22,10 +23,11 @@ class EEG_Denoiser(nn.Module):
 
 
 class Enc_eeg(nn.Sequential):
-    def __init__(self, emb_size=40, depth=3, n_classes=4, config="GA", **kwargs):
+    def __init__(self, emb_size=40, config="GA", patch_encoder="tsconv", **kwargs):
         super().__init__(
+            # nn.InstanceNorm2d(num_features=1), # Normalize each trial
             SpatialEncoder(config),
-            PatchEmbedding(emb_size),
+            PatchEmbedding(emb_size, patch_encoder, **kwargs),
             FlattenHead(),
         )
 
@@ -73,33 +75,96 @@ class SpatialEncoder(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         return self.spatial(x)
 
-
 class PatchEmbedding(nn.Module):
-    def __init__(self, emb_size=40):
+    def __init__(self, emb_size=40, type="tsconv", **kwargs):
         super().__init__()
+        if type == "tsconv":
         # revised from shallownet
-        self.tsconv = nn.Sequential(
-            nn.Conv2d(1, 40, (1, 25), (1, 1)),
-            nn.AvgPool2d((1, 51), (1, 5)),
-            nn.BatchNorm2d(40),
-            nn.ELU(),
-            nn.Conv2d(40, 40, (63, 1), (1, 1)),
-            nn.BatchNorm2d(40),
-            nn.ELU(),
-            nn.Dropout(0.5),
-        )
+            final_channels = 40
+            self.patch_encoder = nn.Sequential(
+                nn.Conv2d(1, 40, (1, 25), (1, 1)),
+                nn.AvgPool2d((1, 51), (1, 5)),
+                nn.BatchNorm2d(40),
+                nn.ELU(),
+                nn.Conv2d(40, 40, (63, 1), (1, 1)),
+                nn.BatchNorm2d(40),
+                nn.ELU(),
+                nn.Dropout(0.5),
+            )
+        elif type == "multiscale_1block":
+            final_channels = kwargs['mstc_out_channels']
+            self.patch_encoder = nn.Sequential(
+                MultiScaleTemporalConvBlock(
+                    in_ch=1,
+                    out_ch=final_channels,
+                    kernel_sizes=kwargs['mstc_kernel_sizes'],
+                    dilation_rates=kwargs['mstc_dilation_rates'],
+                    pool_cfg=dict(
+                        kernel_size=kwargs['mstc_pool_kernel_size'],
+                        stride=kwargs['mstc_pool_stride']
+                    ),
+                    dropout_p=kwargs['mstc_dropout_p'],
+                ),
 
+                # Aggregation across electrodes
+                nn.Conv2d(final_channels, final_channels, (63, 1), (1, 1)),
+                nn.BatchNorm2d(final_channels),
+                nn.ELU(),
+                nn.Dropout2d(kwargs['pe_dropout_p']),
+            )
+        elif type == "multiscale_2block":
+            intermediate_channels = 33
+            final_channels = 42
+            self.patch_encoder = nn.Sequential(
+                # Temporal block 1
+                MultiScaleTemporalConvBlock(
+                    in_ch=1,
+                    out_ch=intermediate_channels,
+                    kernel_sizes=(3, 11, 21),
+                    dilation_rates=(1, 2, 3),
+                    pool_cfg=dict(
+                        kernel_size=(1, 30),
+                        stride=(1, 2)
+                    ),
+                    dropout_p=0.25,
+                ),
+
+                # Spatial electrode-level SE & mixing across electrodes
+                Rearrange("b c h w -> b h c w"),
+                SqueezeExcite(NUM_ELECTRODES),
+                nn.Conv2d(NUM_ELECTRODES, NUM_ELECTRODES, 1, bias=False),
+                nn.BatchNorm2d(NUM_ELECTRODES),
+                nn.ELU(inplace=True),
+                Rearrange("b h c w -> b c h w"),
+
+                # Temporal block 2
+                MultiScaleTemporalConvBlock(
+                    in_ch=intermediate_channels,
+                    out_ch=final_channels,
+                    kernel_sizes=(3, 9, 15),
+                    dilation_rates=(1, 2, 3),
+                    pool_cfg=dict(
+                        kernel_size=(1, 7),
+                        stride=(1, 3)
+                    ),
+                    dropout_p=0.25,
+                ),
+
+                # Spatial compacting
+                nn.Conv2d(final_channels, final_channels, (63, 1), (1, 1)),
+                nn.BatchNorm2d(final_channels),
+                nn.ELU(),
+            )
+        
         self.projection = nn.Sequential(
-            nn.Conv2d(40, emb_size, (1, 1), stride=(1, 1)),
+            nn.Conv2d(final_channels, emb_size, (1, 1), stride=(1, 1)),
             Rearrange("b e (h) (w) -> b (h w) e"),
         )
 
     def forward(self, x: Tensor) -> Tensor:
-        # b, _, _, _ = x.shape
-        x = self.tsconv(x)
+        x = self.patch_encoder(x)
         x = self.projection(x)
         return x
-
 
 # ===== Projectors =====
 
