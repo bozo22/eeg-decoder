@@ -16,7 +16,6 @@ import wandb
 
 import torch
 import torch.nn as nn
-from torch.optim.lr_scheduler import OneCycleLR
 
 from functools import partialmethod
 from tqdm import tqdm
@@ -590,7 +589,7 @@ class IE:
                 for i in range(len(n_way_top1))
             ]
 
-        saliencies = np.concat(saliencies, axis=0).mean(axis=0)
+            saliencies = np.concat(saliencies, axis=0).mean(axis=0) if self.saliency else []
 
         print(
             f">> Subject {self.nSub} - The test Top1-%.6f, Top3-%.6f, Top5-%.6f"
@@ -630,7 +629,6 @@ def main():
 
         cal_num += 1
         starttime = time.time()
-        seed_n = np.random.randint(args.seed)
 
         print("Subject %d" % (i + 1))
         ie = IE(args, n_ways, i + 1)
@@ -687,16 +685,28 @@ def main():
             wandb.run.summary[f"{subj}/{n_ways[j]}-way"] = avern[i][j]
 
     # Log saliency maps
-    all_saliencies = np.array(all_saliencies)
-    saliency_mean = np.mean(all_saliencies, axis=0)
-    saliency_std = np.std(all_saliencies, axis=0)
-    wandb.run.summary[f"saliency_mean"] = saliency_mean
-    wandb.run.summary[f"saliency_std"] = saliency_std
+    if args.saliency:
+        all_saliencies = np.array(all_saliencies)
+        saliency_mean = np.mean(all_saliencies, axis=0)
+        saliency_std = np.std(all_saliencies, axis=0)
+        wandb.run.summary[f"saliency_mean"] = saliency_mean
+        wandb.run.summary[f"saliency_std"] = saliency_std
 
     column = np.arange(1, cal_num + 1).tolist()
     column.append("ave")
     pd_all = pd.DataFrame(columns=column, data=[aver, aver3, aver5])
     pd_all.to_csv(os.path.join(result_path, "train_results.csv"))
+
+    # Print results table
+    print("\nResults Table:")
+    print("-" * 120)
+    headers = [f"Subject{i+1}" for i in range(10)] + ["Average"]
+    print(f"{'':12} " + " ".join(f"{h:>8}" for h in headers))
+    print("-" * 120)
+    print(f"{'Top-1':12} " + " ".join(f"{acc:8.2f}" for acc in aver))
+    print(f"{'Top-3':12} " + " ".join(f"{acc:8.2f}" for acc in aver3))
+    print(f"{'Top-5':12} " + " ".join(f"{acc:8.2f}" for acc in aver5))
+    print("-" * 120)
 
     run.finish()
 

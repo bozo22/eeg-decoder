@@ -93,7 +93,6 @@ class PatchEmbedding(nn.Module):
             )
         elif type == "multiscale_1block":
             final_channels = kwargs['mstc_out_channels']
-            second_temporal_conv_kernel_size = 5
             self.patch_encoder = nn.Sequential(
                 MultiScaleTemporalConvBlock(
                     in_ch=1,
