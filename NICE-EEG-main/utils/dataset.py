@@ -277,7 +277,7 @@ def get_dataloaders(
     )
 
 
-def get_test_dataloader(eeg_data_path, img_data_path, dnn, subject_id):
+def get_test_dataloader(eeg_data_path, img_data_path, dnn, subject_id, use_eeg_denoiser=False):
 
     print("Start loading test data...")
 
@@ -287,11 +287,8 @@ def get_test_dataloader(eeg_data_path, img_data_path, dnn, subject_id):
         os.path.join(eeg_data_path, "preprocessed_eeg_test.npy"), allow_pickle=True
     )
     eeg_test_data = eeg_test_data["preprocessed_eeg_data"]
-    # Average across repetitions
-    eeg_test_data = np.mean(
-        eeg_test_data, axis=1
-    )  # Shape: (total_nr_test_imgs x 1 x channels x 250)
-    eeg_test_data = np.expand_dims(eeg_test_data, axis=1)
+    # Calculate aggregations
+    eeg_test_data = calculate_aggregations(eeg_test_data, use_eeg_denoiser)
     test_eeg = torch.from_numpy(eeg_test_data).type(torch.FloatTensor)
 
     # Image test data
