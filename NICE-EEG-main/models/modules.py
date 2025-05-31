@@ -23,11 +23,11 @@ class EEG_Denoiser(nn.Module):
 
 
 class Enc_eeg(nn.Sequential):
-    def __init__(self, emb_size=40, config="GA", patch_encoder="tsconv", **kwargs):
+    def __init__(self, emb_size=40, config="GA", patch_encoder="tsconv"):
         super().__init__(
             # nn.InstanceNorm2d(num_features=1), # Normalize each trial
             SpatialEncoder(config),
-            PatchEmbedding(emb_size, patch_encoder, **kwargs),
+            PatchEmbedding(emb_size, patch_encoder),
             FlattenHead(),
         )
 
@@ -76,7 +76,7 @@ class SpatialEncoder(nn.Module):
         return self.spatial(x)
 
 class PatchEmbedding(nn.Module):
-    def __init__(self, emb_size=40, type="tsconv", **kwargs):
+    def __init__(self, emb_size=40, type="tsconv"):
         super().__init__()
         if type == "tsconv":
         # revised from shallownet
@@ -92,25 +92,25 @@ class PatchEmbedding(nn.Module):
                 nn.Dropout(0.5),
             )
         elif type == "multiscale_1block":
-            final_channels = kwargs['mstc_out_channels']
+            final_channels = 42
             self.patch_encoder = nn.Sequential(
                 MultiScaleTemporalConvBlock(
                     in_ch=1,
                     out_ch=final_channels,
-                    kernel_sizes=kwargs['mstc_kernel_sizes'],
-                    dilation_rates=kwargs['mstc_dilation_rates'],
+                    kernel_sizes=[3, 15, 25],
+                    dilation_rates=[1, 1, 2],
                     pool_cfg=dict(
-                        kernel_size=kwargs['mstc_pool_kernel_size'],
-                        stride=kwargs['mstc_pool_stride']
+                        kernel_size=(1, 51),
+                        stride=(1, 5)
                     ),
-                    dropout_p=kwargs['mstc_dropout_p'],
+                    dropout_p=0.3,
                 ),
 
                 # Aggregation across electrodes
                 nn.Conv2d(final_channels, final_channels, (63, 1), (1, 1)),
                 nn.BatchNorm2d(final_channels),
                 nn.ELU(),
-                nn.Dropout2d(kwargs['pe_dropout_p']),
+                nn.Dropout2d(0.3),
             )
         elif type == "multiscale_2block":
             intermediate_channels = 33

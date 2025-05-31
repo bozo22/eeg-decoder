@@ -150,49 +150,6 @@ parser.add_argument(
     choices=["tsconv", "multiscale_1block", "multiscale_2block"],
     help="Configuration for the EEG patch encoder"
 )
-# MultiScaleTemporalConvBlock parameters
-parser.add_argument(
-    "--mstc_out_channels",
-    default=42,
-    type=int,
-    help="Number of output channels for MultiScaleTemporalConvBlock"
-)
-parser.add_argument(
-    "--mstc_kernel_sizes",
-    default="3,15,25",
-    type=str,
-    help="Comma-separated list of kernel sizes for MultiScaleTemporalConvBlock"
-)
-parser.add_argument(
-    "--mstc_dilation_rates",
-    default="1,1,2",
-    type=str,
-    help="Comma-separated list of dilation rates for MultiScaleTemporalConvBlock"
-)
-parser.add_argument(
-    "--mstc_pool_kernel_size",
-    default="1,51",
-    type=str,
-    help="Comma-separated tuple of kernel size for pooling in MultiScaleTemporalConvBlock"
-)
-parser.add_argument(
-    "--mstc_pool_stride",
-    default="1,5",
-    type=str,
-    help="Comma-separated tuple of stride for pooling in MultiScaleTemporalConvBlock"
-)
-parser.add_argument(
-    "--mstc_dropout_p",
-    default=0.3,
-    type=float,
-    help="Dropout probability for MultiScaleTemporalConvBlock"
-)
-parser.add_argument(
-    "--pe_dropout_p",
-    default=0.3,
-    type=float,
-    help="Dropout probability for EEG patch encoder"
-)
 
 args = parser.parse_args()
 if args.mixup and args.mixup_in_class:
@@ -258,14 +215,6 @@ if args.mode == "small_run":
 elif args.mode == "debug":
     print(">>> Training with debug mode (100 training EEG samples per subject only)")
     dataset_mode = "debug"
-
-# ===== Parse comma-separated arguments into tuples/lists =====
-args.mstc_kernel_sizes = tuple(map(int, args.mstc_kernel_sizes.split(',')))
-args.mstc_dilation_rates = tuple(map(int, args.mstc_dilation_rates.split(',')))
-assert len(args.mstc_kernel_sizes) == len(args.mstc_dilation_rates), "Kernel sizes and dilation rates must have the same length"
-args.mstc_pool_kernel_size = tuple(map(int, args.mstc_pool_kernel_size.split(',')))
-args.mstc_pool_stride = tuple(map(int, args.mstc_pool_stride.split(',')))
-assert len(args.mstc_pool_kernel_size) == len(args.mstc_pool_stride), "Pool kernel size and stride must have the same length"
 
 # Image2EEG
 class IE:
