@@ -2,12 +2,12 @@ import argparse
 import os
 from pprint import pprint
 
+import numpy as np
 import torch
 from tqdm import tqdm
 from models.SuperNICE import SuperNICE
 from utils.utils import load_model
 from utils.dataset import get_test_dataloader
-
 
 parser = argparse.ArgumentParser(description='Test the model for Stimuli Recognition')
 # Main parameters
@@ -73,6 +73,9 @@ eeg_data_path = os.path.join(args.dataset_path, 'Preprocessed_data_250Hz')
 img_data_path = os.path.join(args.dataset_path, 'image_features', "final_embedding")
 
 subject_ids = [args.subject_id] if args.subject_id is not None else [i for i in range(1, 11)]
+print(f"Subject IDs to test on: {subject_ids}")
+
+SAVE_PATH = os.path.join(args.checkpoint_path, 'similarity')
 
 for subject_id in subject_ids:
 
@@ -110,6 +113,7 @@ for subject_id in subject_ids:
             tfea, timg = model(teeg, timg)
 
             similarity = (tfea @ timg.t()).softmax(dim=-1)
+            np.save(os.path.join(SAVE_PATH, f'sub{subject_id}_sim.npy'), similarity.cpu().numpy())
             _, indices = similarity.topk(5)
 
             tt_label = tlabel.view(-1, 1)
