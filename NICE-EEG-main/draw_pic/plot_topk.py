@@ -3,32 +3,24 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import os 
 
+MODEL_NAME = 'SuperNICE'
 sub_idx = 1
 y_true = np.arange(200)
 # y_true = y_true.view(-1, 1)
-y_pred = np.load('./pic/y_pred/sub%d_pred.npy' % sub_idx)
+y_pred = np.load(os.path.join('NICE-EEG-main/results', MODEL_NAME, 'similarity', f'sub{sub_idx}_sim.npy'))
+y_pred = np.argsort(y_pred, axis=1)[:, -5:][:, ::-1]
 
-# match = (y_pred == y_true)
-match = []
-for i in range(len(y_true)):
-    match.append(y_pred[i] == y_true[i])
+# Find indices where top5 predictions contain the true label
+match = np.array([y_true[i] in y_pred[i] for i in range(len(y_true))])
+match_place = np.where(match)[0]
 
-match = np.sum(match, axis=1)
-match_place = np.where(match == 1)[0]
-
-things_eeg_test_images_path = '/home/Data/Things-EEG2/Image_set/image_set/test_images/'
-things_list = os.listdir(things_eeg_test_images_path)
+things_eeg_test_images_path = 'Things-EEG2/Image_set/test_images'
+things_list = [x for x in os.listdir(things_eeg_test_images_path) if x.startswith('00')]
 things_list.sort()
+print(f"Things list is: {things_list}")
 
-# fig, ax = plt.subplots(5, 6, figsize=(20, 20))
-# fig.subplots_adjust(hspace=0.5, wspace=0.1)
-# bwidth = 2
 fig, axes = plt.subplots(nrows=5, ncols=6, figsize=(10, 8), gridspec_kw={'wspace': 0.1, 'hspace': 0.2})
-
-# match_range = 65
-# match_place = match_place[match_range:match_range+5]
-place = [22, 5, 30, 18, 45]
-# place = [22, 5, 8, 18, 45]
+place = [6, 9, 31, 43, 61]
 
 for i in range(5):
     # plt.subplot(5, 6, 6*i+1)
@@ -63,6 +55,7 @@ for i in range(5):
         axes[i, j+1].spines['left'].set_visible(False)
         axes[i, j+1].set_xlabel(things_list[tmp_idx][6:], fontsize=12, labelpad=2)
 
-plt.savefig('./pic/Conf/topk.svg', dpi=300)
+plt.savefig('NICE-EEG-main/draw_pic/topk.png', dpi=300)
+# plt.show()
 
 
