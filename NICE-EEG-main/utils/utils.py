@@ -3,7 +3,6 @@ import random
 import numpy as np
 import torch
 import torch.nn as nn
-import wandb
 
 def seed_experiments(seed):
     print(f'Seeding experiments with seed: {seed}')
@@ -35,33 +34,3 @@ def load_model(model, chekpoint_path, run_name, subject_id, checkpoint_uuid, dev
 def new_best_epoch(val_split_per_condition, best_val_loss, best_val_top1, val_loss, val_top1):
     return val_split_per_condition and val_top1 > best_val_top1 \
         or not val_split_per_condition and val_loss < best_val_loss
-
-
-def save_checkpoint_wandb(chekpoint_path, subject_id):
-    # create an Artifact object
-    artifact = wandb.Artifact(
-        name=f"BestModel_sub{subject_id}",
-        type="checkpoint",
-        description="Best val-top1 checkpoint",
-        metadata={
-            "subject_id": subject_id
-        },
-    )
-    # attach the file(s)
-    artifact.add_file(chekpoint_path)
-    # log it to the run
-    wandb.run.log_artifact(artifact, aliases=["best"])
-    print(f"Checkpoint saved to wandb")
-
-def wandb_login(disable_wandb: bool):
-    if disable_wandb:
-        print("!! WandB disabled !!")
-        return
-    else:
-        try:
-            with open("wandb.password", "rt") as f:
-                pw = f.readline().strip()
-                os.environ["WANDB_API_KEY"] = pw
-                wandb.login()
-        except FileNotFoundError:
-            raise FileNotFoundError("File wandb.password was not found in the project root. Either add it or disable wandb by running --disable_wandb")

@@ -12,7 +12,6 @@ import numpy as np
 import pandas as pd
 from pprint import pprint
 import logging as l
-import wandb
 
 import torch
 import torch.nn as nn
@@ -23,10 +22,8 @@ from models.SuperNICE import SuperNICE
 from utils.utils import (
     load_model,
     new_best_epoch,
-    save_checkpoint_wandb,
     save_model,
     seed_experiments,
-    wandb_login,
 )
 from utils.dataset import SMALL_RUN_RATIO, get_dataloaders, mixup
 
@@ -86,13 +83,6 @@ parser.add_argument(
     type=str,
     choices=["debug", "small_run", "no_patience"],
     help="If `debug`, will run in debug mode with only 100 samples per subject. If `small_run`, will use only  25% of the dataset. If `no_patience`, will not use early stopping.",
-)
-# WandB parameters
-parser.add_argument(
-    "--disable_wandb", action="store_true", help="If True, will not use wandb."
-)
-parser.add_argument(
-    "--run_group", default=None, type=str, help="Group name for the WandB run."
 )
 
 # Mixup parameters
@@ -157,24 +147,6 @@ if args.mixup and args.mixup_in_class:
         "Cannot use both mixup across classes and mixup within the same class. Please choose one."
     )
 
-# ===== WandB setup =====
-wandb_login(args.disable_wandb)
-run = wandb.init(
-    entity="EEG_decoder",
-    project="EEG-Decoder",
-    config=vars(args),
-    mode="disabled" if args.disable_wandb else "online",
-    group=args.run_group,
-)
-for k, v in run.config.items():
-    setattr(args, k, v)
-pprint(args)
-
-# ===== WandB metrics =====
-wandb.define_metric("epoch")
-wandb.define_metric("train/*", step_metric="epoch")
-wandb.define_metric("val/*", step_metric="epoch")
-
 # ===== Set device =====
 device = torch.device(
     "cuda" if torch.cuda.is_available() and args.device == "gpu" else "cpu"
@@ -203,7 +175,6 @@ else:
 run_name = f"{args.eeg_patch_encoder}-" + run_name
 run_name = f"mixup({args.mixup_alpha if args.mixup else 'none'})-{run_name}"
 run_name = f"spatial({args.config})-denoiser({args.use_eeg_denoiser})-{run_name}"
-run.name = run_name
 
 # ===== Pre-run setup =====
 dataset_mode = None
@@ -363,14 +334,7 @@ class IE:
             avg_epoch_loss = sum(epoch_losses) / len(epoch_losses)
             avg_epoch_loss_eeg = sum(epoch_losses_eeg) / len(epoch_losses_eeg)
             avg_epoch_loss_img = sum(epoch_losses_img) / len(epoch_losses_img)
-            wandb.log(
-                {
-                    "epoch": e + 1,
-                    f"train/loss/subj{self.nSub}": avg_epoch_loss,
-                    f"train/loss_eeg/subj{self.nSub}": avg_epoch_loss_eeg,
-                    f"train/loss_img/subj{self.nSub}": avg_epoch_loss_img,
-                }
-            )
+
             train_results[0, e, 0] = avg_epoch_loss
             train_results[0, e, 1] = avg_epoch_loss_eeg
             train_results[0, e, 2] = avg_epoch_loss_img
@@ -421,14 +385,6 @@ class IE:
                     avg_val_loss_eeg = sum(val_losses_eeg) / len(val_losses_eeg)
                     avg_val_loss_img = sum(val_losses_img) / len(val_losses_img)
                     val_top1 = val_top1 / total_val_samples
-                    wandb.log(
-                        {
-                            "epoch": e + 1,
-                            f"val/loss/subj{self.nSub}": avg_val_loss,
-                            f"val/loss_eeg/subj{self.nSub}": avg_val_loss_eeg,
-                            f"val/loss_img/subj{self.nSub}": avg_val_loss_img,
-                        }
-                    )
                     train_results[1, e, 0] = avg_val_loss
                     train_results[1, e, 1] = avg_val_loss_eeg
                     train_results[1, e, 2] = avg_val_loss_img
@@ -475,7 +431,6 @@ class IE:
         self.model, save_path = load_model(
             self.model, model_checkpoint_path, run_name, self.nSub, checkpoint_uuid
         )
-        save_checkpoint_wandb(save_path, self.nSub)
         self.model.eval()
 
         saliencies = []
@@ -607,14 +562,6 @@ def main():
             epoch = e + 1
             for k in range(len(avg_train_results[i][e])):
                 metric_name = {0: "loss", 1: "loss_eeg", 2: "loss_img", 3: "top1"}
-                wandb.log(
-                    {
-                        "epoch": epoch,
-                        f"{mode}/{metric_name[k]}": avg_train_results[i][e][k],
-                    }
-                )
-    # Log average (across subjects) best val top1 accuracy
-    wandb.run.summary["val/top1"] = best_val_top1_avg / num_sub
 
     # Compute and log test results
     aver.append(np.mean(aver))
@@ -622,24 +569,12 @@ def main():
     aver5.append(np.mean(aver5))
     avern_a = np.array(avern)
     avern.append(np.mean(avern_a, axis=0))
-    for i in range(len(aver)):
-        if i == len(aver) - 1:
-            subj = "ave"
-        else:
-            subj = f"Subject {i+1}"
-        wandb.run.summary[f"{subj}/top1"] = aver[i]
-        wandb.run.summary[f"{subj}/top3"] = aver3[i]
-        wandb.run.summary[f"{subj}/top5"] = aver5[i]
-        for j in range(len(avern[i])):
-            wandb.run.summary[f"{subj}/{n_ways[j]}-way"] = avern[i][j]
 
     # Log saliency maps
     if args.saliency:
         all_saliencies = np.array(all_saliencies)
         saliency_mean = np.mean(all_saliencies, axis=0)
         saliency_std = np.std(all_saliencies, axis=0)
-        wandb.run.summary[f"saliency_mean"] = saliency_mean
-        wandb.run.summary[f"saliency_std"] = saliency_std
 
     column = np.arange(1, cal_num + 1).tolist()
     column.append("ave")
@@ -656,9 +591,6 @@ def main():
     print(f"{'Top-3':12} " + " ".join(f"{acc:8.2f}" for acc in aver3))
     print(f"{'Top-5':12} " + " ".join(f"{acc:8.2f}" for acc in aver5))
     print("-" * 120)
-
-    run.finish()
-
 
 if __name__ == "__main__":
     print(time.asctime(time.localtime(time.time())))
